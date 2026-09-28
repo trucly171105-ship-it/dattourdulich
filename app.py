@@ -1,1340 +1,846 @@
 import streamlit as st
-import socket
-import uuid
-from datetime import datetime, date
-
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import URL
+from datetime import date, timedelta
+import random
 
 # ============================================================
-# CẤU HÌNH ỨNG DỤNG
+# APP ĐẶT TOUR THÔNG MINH
+# 3 tính năng chính:
+# 1. Trợ lý AI cá nhân hóa tour
+# 2. Đổi lịch trình thông minh
+# 5. Trợ lý xử lý sự cố
 # ============================================================
 
 st.set_page_config(
-    page_title="VietTour - Đặt Tour Du Lịch",
-    page_icon="🌴",
+    page_title="SmartTour - Đặt tour thông minh",
+    page_icon="🧳",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Hiển thị banner nếu file tồn tại; tránh làm app lỗi nếu thiếu VT.jpg
-try:
-    st.image("VT.jpg", use_container_width=True)
-except Exception:
-    pass
-
-# ============================================================
-# KẾT NỐI AIVEN MYSQL
-# ============================================================
-
-# Ưu tiên lấy cấu hình từ st.secrets khi triển khai Streamlit Cloud.
-# Nếu chưa có secrets, app sẽ dùng cấu hình Aiven bên dưới.
-try:
-    DB_USER = st.secrets["mysql"]["user"]
-    DB_PASSWORD = st.secrets["mysql"]["password"]
-    DB_HOST = st.secrets["mysql"]["host"]
-    DB_PORT = st.secrets["mysql"]["port"]
-    DB_NAME = st.secrets["mysql"]["database"]
-except Exception:
-    DB_USER = "avnadmin"
-    DB_PASSWORD = "AVNS_cyQyD8Ez8n3Ggy-ax8l"
-    DB_HOST = "mysql-d660cbf-trucly171105-b953.k.aivencloud.com"
-    DB_PORT = 27221
-    DB_NAME = "defaultdb"
-
-# ------------------------------------------------------------------
-# Làm sạch dữ liệu kết nối
-# ------------------------------------------------------------------
-
-DB_USER = str(DB_USER).strip()
-DB_PASSWORD = str(DB_PASSWORD).strip()
-DB_HOST = str(DB_HOST).strip()
-DB_NAME = str(DB_NAME).strip()
-DB_PORT = int(DB_PORT)
-
-# ============================================================
-# DEBUG KẾT NỐI AIVEN
-# ============================================================
-
-with st.expander("🔧 Kiểm tra kết nối Aiven", expanded=False):
-    st.write("**HOST:**", repr(DB_HOST))
-    st.write("**PORT:**", repr(DB_PORT))
-    st.write("**DATABASE:**", repr(DB_NAME))
-    st.write("**USER:**", repr(DB_USER))
-
-    if DB_HOST != DB_HOST.strip():
-        st.error("HOST đang có khoảng trắng ở đầu hoặc cuối. Đã tự động loại bỏ.")
-    else:
-        st.success("HOST không có khoảng trắng.")
-
-    if st.button("🔍 Kiểm tra DNS Aiven", key="check_dns_aiven"):
-        try:
-            ip_address = socket.gethostbyname(DB_HOST)
-            st.success(f"DNS OK - Host Aiven trỏ tới IP: {ip_address}")
-        except Exception as e:
-            st.error(f"DNS ERROR: Không phân giải được hostname Aiven.\n\n{e}")
-
-# ============================================================
-# TẠO DATABASE URL
-# ============================================================
-
-DATABASE_URL = URL.create(
-    drivername="mysql+pymysql",
-    username=DB_USER,
-    password=DB_PASSWORD,
-    host=DB_HOST,
-    port=DB_PORT,
-    database=DB_NAME,
-)
-
-# ============================================================
-# DATABASE ENGINE
-# ============================================================
-
-@st.cache_resource
-def get_db_engine():
-    return create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=5,
-        connect_args={"connect_timeout": 15},
-    )
-
-# ============================================================
-# KIỂM TRA KẾT NỐI MYSQL
-# ============================================================
-
-def test_database_connection():
-    try:
-        engine = get_db_engine()
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT 1"))
-            result.fetchone()
-        return True, "Kết nối Aiven MySQL thành công!"
-    except Exception as e:
-        return False, str(e)
-
-# ============================================================
-# DATABASE - KHỞI TẠO BẢNG VÀ DỮ LIỆU MẪU
-# ============================================================
-
-def init_database():
-    engine = get_db_engine()
-
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS tours (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                destination VARCHAR(255) NOT NULL,
-                duration VARCHAR(100) NOT NULL,
-                price DECIMAL(15,2) NOT NULL,
-                category VARCHAR(100) NOT NULL,
-                image TEXT,
-                description TEXT,
-                schedule TEXT,
-                max_people INT DEFAULT 30
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """))
-
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS bookings (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                booking_code VARCHAR(50) UNIQUE NOT NULL,
-                tour_id INT NOT NULL,
-                customer_name VARCHAR(255) NOT NULL,
-                phone VARCHAR(50) NOT NULL,
-                email VARCHAR(255),
-                people INT NOT NULL,
-                departure_date VARCHAR(50) NOT NULL,
-                payment_method VARCHAR(100) NOT NULL,
-                note TEXT,
-                total_price DECIMAL(15,2) NOT NULL,
-                status VARCHAR(100) DEFAULT 'Chờ xác nhận',
-                created_at VARCHAR(50) NOT NULL,
-                CONSTRAINT fk_bookings_tour
-                    FOREIGN KEY (tour_id) REFERENCES tours(id)
-                    ON UPDATE CASCADE
-                    ON DELETE RESTRICT
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """))
-
-        count = conn.execute(text("SELECT COUNT(*) FROM tours")).scalar_one()
-
-        if count == 0:
-            tours = [
-                (
-                    "Khám phá Vũng Tàu 2N1Đ",
-                    "Vũng Tàu",
-                    "2 ngày 1 đêm",
-                    1890000,
-                    "Biển",
-                    "https://images.unsplash.com/photo-1563492065599-3520f775eeed?auto=format&fit=crop&w=1200&q=80",
-                    "Khám phá những điểm đến nổi bật tại Vũng Tàu như Bạch Dinh, Núi Lớn, Bãi Trước và thưởng thức đặc sản địa phương.",
-                    "Ngày 1: TP.HCM - Vũng Tàu - Bạch Dinh - Bãi Trước\nNgày 2: Núi Lớn - Hải đăng - Mua đặc sản - TP.HCM",
-                    30
-                ),
-                (
-                    "Phú Quốc Thiên Đường 3N2Đ",
-                    "Phú Quốc",
-                    "3 ngày 2 đêm",
-                    4590000,
-                    "Nghỉ dưỡng",
-                    "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=1200&q=80",
-                    "Hành trình nghỉ dưỡng tại đảo ngọc Phú Quốc, kết hợp tham quan biển đảo, vui chơi và thưởng thức ẩm thực.",
-                    "Ngày 1: Đến Phú Quốc - Grand World\nNgày 2: Nam đảo - Hòn Thơm\nNgày 3: Chợ Dương Đông - Tiễn sân bay",
-                    25
-                ),
-                (
-                    "Đà Nẵng - Hội An 4N3Đ",
-                    "Đà Nẵng",
-                    "4 ngày 3 đêm",
-                    5290000,
-                    "Khám phá",
-                    "https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?auto=format&fit=crop&w=1200&q=80",
-                    "Khám phá Đà Nẵng, Hội An và những địa danh nổi tiếng miền Trung.",
-                    "Ngày 1: Đà Nẵng - Sơn Trà\nNgày 2: Bà Nà Hills\nNgày 3: Hội An\nNgày 4: Mua sắm - Tiễn sân bay",
-                    30
-                ),
-                (
-                    "Đà Lạt Mộng Mơ 3N2Đ",
-                    "Đà Lạt",
-                    "3 ngày 2 đêm",
-                    3290000,
-                    "Nghỉ dưỡng",
-                    "https://images.unsplash.com/photo-1557750255-c76072a7aad1?auto=format&fit=crop&w=1200&q=80",
-                    "Hành trình khám phá thành phố ngàn hoa với nhiều địa điểm check-in nổi tiếng.",
-                    "Ngày 1: Trung tâm Đà Lạt\nNgày 2: Đồi chè - Thác Datanla\nNgày 3: Chợ Đà Lạt - Trả khách",
-                    30
-                ),
-                (
-                    "Huế - Dấu ấn Hoàng triều 3N2Đ",
-                    "Huế",
-                    "3 ngày 2 đêm",
-                    3890000,
-                    "Văn hóa",
-                    "https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?auto=format&fit=crop&w=1200&q=80",
-                    "Hành trình tìm hiểu văn hóa, lịch sử và kiến trúc cố đô Huế.",
-                    "Ngày 1: Đại Nội - Đông Ba\nNgày 2: Lăng Khải Định - Lăng Minh Mạng\nNgày 3: Chùa Thiên Mụ - Trả khách",
-                    25
-                ),
-                (
-                    "Nha Trang - Vịnh Nha Trang 3N2Đ",
-                    "Nha Trang",
-                    "3 ngày 2 đêm",
-                    4190000,
-                    "Biển",
-                    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80",
-                    "Tận hưởng biển xanh Nha Trang và trải nghiệm tour đảo.",
-                    "Ngày 1: Nha Trang - Tháp Bà\nNgày 2: Tour đảo - Lặn ngắm san hô\nNgày 3: Mua sắm - Trả khách",
-                    30
-                ),
-            ]
-
-            conn.execute(text("""
-                INSERT INTO tours
-                (name, destination, duration, price, category, image, description, schedule, max_people)
-                VALUES
-                (:name, :destination, :duration, :price, :category, :image, :description, :schedule, :max_people)
-            """), [
-                {
-                    "name": t[0], "destination": t[1], "duration": t[2], "price": t[3],
-                    "category": t[4], "image": t[5], "description": t[6],
-                    "schedule": t[7], "max_people": t[8]
-                }
-                for t in tours
-            ])
-
-# ============================================================
-# HÀM DATABASE
-# ============================================================
-
-def get_tours():
-    engine = get_db_engine()
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT * FROM tours ORDER BY id DESC"))
-        return result.mappings().all()
-
-
-def get_tour(tour_id):
-    engine = get_db_engine()
-    with engine.connect() as conn:
-        result = conn.execute(
-            text("SELECT * FROM tours WHERE id = :tour_id"),
-            {"tour_id": tour_id}
-        )
-        return result.mappings().first()
-
-
-def create_booking(
-    tour_id,
-    customer_name,
-    phone,
-    email,
-    people,
-    departure_date,
-    payment_method,
-    note,
-    total_price
-):
-    engine = get_db_engine()
-
-    booking_code = (
-        "VT" + datetime.now().strftime("%y%m%d") +
-        uuid.uuid4().hex[:6].upper()
-    )
-    created_at = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-
-    with engine.begin() as conn:
-        conn.execute(text("""
-            INSERT INTO bookings
-            (
-                booking_code, tour_id, customer_name, phone, email, people,
-                departure_date, payment_method, note, total_price, status, created_at
-            )
-            VALUES
-            (
-                :booking_code, :tour_id, :customer_name, :phone, :email, :people,
-                :departure_date, :payment_method, :note, :total_price, :status, :created_at
-            )
-        """), {
-            "booking_code": booking_code,
-            "tour_id": tour_id,
-            "customer_name": customer_name,
-            "phone": phone,
-            "email": email,
-            "people": people,
-            "departure_date": departure_date,
-            "payment_method": payment_method,
-            "note": note,
-            "total_price": total_price,
-            "status": "Chờ xác nhận",
-            "created_at": created_at,
-        })
-
-    return booking_code
-
-
-def get_booking(booking_code):
-    engine = get_db_engine()
-    with engine.connect() as conn:
-        result = conn.execute(text("""
-            SELECT
-                bookings.*,
-                tours.name AS tour_name,
-                tours.destination,
-                tours.duration
-            FROM bookings
-            JOIN tours ON bookings.tour_id = tours.id
-            WHERE bookings.booking_code = :booking_code
-        """), {"booking_code": booking_code})
-        return result.mappings().first()
-
-
-def get_all_bookings():
-    engine = get_db_engine()
-    with engine.connect() as conn:
-        result = conn.execute(text("""
-            SELECT
-                bookings.*,
-                tours.name AS tour_name
-            FROM bookings
-            JOIN tours ON bookings.tour_id = tours.id
-            ORDER BY bookings.id DESC
-        """))
-        return result.mappings().all()
-
-
-def cancel_booking(booking_code):
-    engine = get_db_engine()
-    with engine.begin() as conn:
-        conn.execute(
-            text("""
-                UPDATE bookings
-                SET status = 'Đã hủy'
-                WHERE booking_code = :booking_code
-            """),
-            {"booking_code": booking_code}
-        )
-
-# ============================================================
-# FORMAT TIỀN
-# ============================================================
-
-def format_price(price):
-    return f"{price:,.0f}".replace(",", ".") + " VNĐ"
-
-
-# ============================================================
+st.image("VT.jpg")
+# -----------------------------
 # CSS
-# ============================================================
-
-def load_css():
-    st.markdown("""
-    <style>
-
-    .main {
-        background-color: #f7f9fc;
-    }
-
-    .hero {
-        padding: 45px 35px;
-        border-radius: 20px;
-        margin-bottom: 30px;
-        background: linear-gradient(
-            135deg,
-            #0077b6 0%,
-            #00b4d8 100%
-        );
-        color: white;
-    }
-
-    .hero h1 {
-        font-size: 42px;
+# -----------------------------
+st.markdown("""
+<style>
+    .main-title {
+        font-size: 38px;
         font-weight: 800;
-        margin-bottom: 10px;
+        margin-bottom: 5px;
     }
-
-    .hero p {
-        font-size: 18px;
-        opacity: 0.95;
+    .subtitle {
+        color: #666;
+        font-size: 17px;
+        margin-bottom: 25px;
     }
-
     .tour-card {
-        background: white;
-        border-radius: 18px;
-        padding: 12px;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-        border: 1px solid #eeeeee;
-    }
-
-    .price {
-        color: #e63946;
-        font-size: 22px;
-        font-weight: 800;
-    }
-
-    .tour-title {
-        font-size: 21px;
-        font-weight: 700;
-        margin-top: 10px;
-    }
-
-    .badge {
-        background: #e8f7ff;
-        color: #0077b6;
-        padding: 5px 10px;
-        border-radius: 20px;
-        font-size: 13px;
-        font-weight: 600;
-    }
-
-    .info-box {
-        background: white;
         padding: 20px;
         border-radius: 15px;
-        border: 1px solid #e5e7eb;
+        border: 1px solid #e6e6e6;
         margin-bottom: 15px;
+        background: white;
     }
-
+    .price {
+        font-size: 24px;
+        font-weight: 700;
+    }
+    .feature-card {
+        padding: 18px;
+        border-radius: 14px;
+        background: #f7f9fc;
+        border: 1px solid #e7ebf0;
+        min-height: 150px;
+    }
     .success-box {
-        padding: 25px;
-        border-radius: 15px;
-        background: #ecfdf5;
-        border: 1px solid #10b981;
+        padding: 15px;
+        border-radius: 12px;
+        background: #eaf8ef;
+        border: 1px solid #b9e4c7;
     }
-
-    .footer {
-        text-align: center;
-        color: #777;
-        padding: 30px;
-        margin-top: 40px;
+    .warning-box {
+        padding: 15px;
+        border-radius: 12px;
+        background: #fff8e6;
+        border: 1px solid #f2d58a;
     }
+    .incident-box {
+        padding: 15px;
+        border-radius: 12px;
+        background: #fff1f1;
+        border: 1px solid #efb3b3;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    </style>
-    """, unsafe_allow_html=True)
+# -----------------------------
+# Dữ liệu mẫu
+# -----------------------------
+TOURS = [
+    {
+        "id": 1,
+        "name": "Phú Quốc 3N2Đ - Khám phá đảo ngọc",
+        "destination": "Phú Quốc",
+        "days": 3,
+        "nights": 2,
+        "price": 4590000,
+        "category": ["biển", "nghỉ dưỡng", "ẩm thực"],
+        "difficulty": "Dễ",
+        "transport": "Máy bay + xe du lịch",
+        "description": "Bãi Sao, Hòn Thơm, chợ đêm và trải nghiệm ẩm thực địa phương.",
+        "schedule": [
+            "Ngày 1: Đón sân bay → nhận phòng → Bãi Sao → ăn tối → chợ đêm",
+            "Ngày 2: Hòn Thơm → cáp treo → vui chơi → ăn tối hải sản",
+            "Ngày 3: Tham quan trung tâm → mua đặc sản → tiễn sân bay"
+        ]
+    },
+    {
+        "id": 2,
+        "name": "Đà Nẵng - Hội An 4N3Đ",
+        "destination": "Đà Nẵng",
+        "days": 4,
+        "nights": 3,
+        "price": 5290000,
+        "category": ["biển", "văn hóa", "ẩm thực", "check-in"],
+        "difficulty": "Dễ",
+        "transport": "Máy bay + xe du lịch",
+        "description": "Bà Nà Hills, phố cổ Hội An, biển Mỹ Khê và ẩm thực miền Trung.",
+        "schedule": [
+            "Ngày 1: Đà Nẵng → nhận phòng → biển Mỹ Khê → cầu Rồng",
+            "Ngày 2: Bà Nà Hills → Cầu Vàng → trở về Đà Nẵng",
+            "Ngày 3: Ngũ Hành Sơn → Hội An → phố cổ → thả đèn",
+            "Ngày 4: Mua đặc sản → tiễn sân bay"
+        ]
+    },
+    {
+        "id": 3,
+        "name": "Đà Lạt 3N2Đ - Săn mây & nghỉ dưỡng",
+        "destination": "Đà Lạt",
+        "days": 3,
+        "nights": 2,
+        "price": 3290000,
+        "category": ["thiên nhiên", "check-in", "nghỉ dưỡng", "ẩm thực"],
+        "difficulty": "Dễ",
+        "transport": "Xe du lịch",
+        "description": "Săn mây, đồi chè, vườn hoa và trải nghiệm cà phê Đà Lạt.",
+        "schedule": [
+            "Ngày 1: Đà Lạt → nhận phòng → quảng trường → chợ đêm",
+            "Ngày 2: Săn mây → đồi chè → vườn hoa → cà phê",
+            "Ngày 3: Dinh thự → mua đặc sản → kết thúc tour"
+        ]
+    },
+    {
+        "id": 4,
+        "name": "Nha Trang 3N2Đ - Biển & vui chơi",
+        "destination": "Nha Trang",
+        "days": 3,
+        "nights": 2,
+        "price": 3990000,
+        "category": ["biển", "nghỉ dưỡng", "vui chơi"],
+        "difficulty": "Dễ",
+        "transport": "Máy bay + xe du lịch",
+        "description": "Biển Nha Trang, đảo, vui chơi và khám phá ẩm thực.",
+        "schedule": [
+            "Ngày 1: Nhận phòng → biển Nha Trang → ăn tối",
+            "Ngày 2: Tour đảo → vui chơi → ăn hải sản",
+            "Ngày 3: Tham quan thành phố → mua đặc sản → kết thúc"
+        ]
+    },
+    {
+        "id": 5,
+        "name": "Huế 3N2Đ - Dấu ấn hoàng triều",
+        "destination": "Huế",
+        "days": 3,
+        "nights": 2,
+        "price": 3490000,
+        "category": ["văn hóa", "lịch sử", "ẩm thực"],
+        "difficulty": "Dễ",
+        "transport": "Xe du lịch",
+        "description": "Đại Nội, lăng vua, chùa Thiên Mụ và ẩm thực cung đình.",
+        "schedule": [
+            "Ngày 1: Đại Nội → Đông Ba → thưởng thức ẩm thực Huế",
+            "Ngày 2: Lăng vua → chùa Thiên Mụ → sông Hương",
+            "Ngày 3: Mua đặc sản → tham quan tự do → kết thúc"
+        ]
+    }
+]
 
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-
+# -----------------------------
+# Session state
+# -----------------------------
 if "page" not in st.session_state:
-    st.session_state.page = "home"
+    st.session_state.page = "Trang chủ"
 
 if "selected_tour" not in st.session_state:
     st.session_state.selected_tour = None
 
-if "booking_code" not in st.session_state:
-    st.session_state.booking_code = None
+if "booking" not in st.session_state:
+    st.session_state.booking = None
+
+if "custom_tour" not in st.session_state:
+    st.session_state.custom_tour = None
+
+if "incident_result" not in st.session_state:
+    st.session_state.incident_result = None
 
 
-# ============================================================
-# HEADER / SIDEBAR
-# ============================================================
+def money(value):
+    return f"{value:,.0f} VNĐ".replace(",", ".")
 
-def sidebar():
-    with st.sidebar:
-        st.image(
-            "https://cdn-icons-png.flaticon.com/512/201/201623.png",
-            width=80
-        )
 
-        st.title("VietTour")
-        st.caption("Nền tảng đặt tour du lịch")
+def find_tour_by_id(tour_id):
+    return next((t for t in TOURS if t["id"] == tour_id), None)
 
-        st.divider()
 
-        if st.button("🏠 Trang chủ", use_container_width=True):
-            st.session_state.page = "home"
+def recommend_tours(days, budget, people, interests, style):
+    """
+    Bộ máy đề xuất tour dạng rule-based.
+    Có thể thay bằng API AI thật sau này.
+    """
+    results = []
 
-        if st.button("🗺️ Tất cả tour", use_container_width=True):
-            st.session_state.page = "tours"
+    for tour in TOURS:
+        score = 0
 
-        if st.button("🔎 Tra cứu đặt tour", use_container_width=True):
-            st.session_state.page = "lookup"
+        # Thời lượng
+        difference = abs(tour["days"] - days)
+        if difference == 0:
+            score += 30
+        elif difference == 1:
+            score += 18
+        elif difference == 2:
+            score += 8
 
-        if st.button("📊 Quản lý đơn", use_container_width=True):
-            st.session_state.page = "admin"
+        # Ngân sách
+        if tour["price"] <= budget:
+            score += 25
+            if tour["price"] >= budget * 0.75:
+                score += 5
+        else:
+            over = tour["price"] - budget
+            if over <= 500000:
+                score += 8
 
-        st.divider()
+        # Số khách
+        if people >= 4:
+            score += 5
 
-        st.markdown("""
-        **VietTour**
+        # Sở thích
+        for interest in interests:
+            if interest in tour["category"]:
+                score += 12
 
-        📞 Hotline: 1900 6868  
-        📧 Email: support@viettour.vn  
-        📍 TP. Hồ Chí Minh, Việt Nam
-        """)
+        # Phong cách
+        if style == "Nghỉ dưỡng" and "nghỉ dưỡng" in tour["category"]:
+            score += 15
+        elif style == "Khám phá" and (
+            "văn hóa" in tour["category"] or "lịch sử" in tour["category"]
+        ):
+            score += 15
+        elif style == "Check-in" and "check-in" in tour["category"]:
+            score += 15
+        elif style == "Ẩm thực" and "ẩm thực" in tour["category"]:
+            score += 15
+
+        results.append((score, tour))
+
+    results.sort(key=lambda x: x[0], reverse=True)
+    return results[:3]
+
+
+def build_custom_schedule(tour, date_start, people):
+    result = []
+    for index, item in enumerate(tour["schedule"]):
+        current_date = date_start + timedelta(days=index)
+        result.append(f"{current_date.strftime('%d/%m/%Y')} — {item}")
+    return result
+
+
+# -----------------------------
+# Sidebar
+# -----------------------------
+with st.sidebar:
+    st.markdown("## 🧳 SmartTour")
+    st.caption("Đặt tour & điều hành tour thông minh")
+
+    menu = st.radio(
+        "MENU",
+        [
+            "Trang chủ",
+            "🤖 Tạo tour bằng AI",
+            "🗺️ Khám phá & đặt tour",
+            "🔄 Đổi lịch trình thông minh",
+            "🚨 Trợ lý xử lý sự cố",
+            "📋 Đơn đặt tour"
+        ],
+        index=0
+    )
+
+    if menu == "Trang chủ":
+        st.session_state.page = "Trang chủ"
+    elif "Tạo tour" in menu:
+        st.session_state.page = "AI"
+    elif "Khám phá" in menu:
+        st.session_state.page = "TOURS"
+    elif "Đổi lịch" in menu:
+        st.session_state.page = "CHANGE"
+    elif "sự cố" in menu:
+        st.session_state.page = "INCIDENT"
+    else:
+        st.session_state.page = "BOOKING"
+
+    st.divider()
+    st.info(
+        "💡 Đây là phiên bản demo không cần MySQL/API. "
+        "Dữ liệu được lưu trong session của phiên chạy."
+    )
 
 
 # ============================================================
 # TRANG CHỦ
 # ============================================================
-
-def home_page():
-
-    st.markdown("""
-    <div class="hero">
-        <h1>🌴 Khám phá Việt Nam cùng VietTour</h1>
-        <p>
-            Đặt tour du lịch nhanh chóng – đơn giản – tiện lợi.
-            Khám phá những điểm đến tuyệt vời trên khắp Việt Nam.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.subheader("🔎 Tìm tour phù hợp với bạn")
-
-    tours = get_tours()
-
-    destinations = ["Tất cả"] + sorted(
-        list(set(t["destination"] for t in tours))
-    )
-
-    categories = ["Tất cả"] + sorted(
-        list(set(t["category"] for t in tours))
+if st.session_state.page == "Trang chủ":
+    st.markdown('<div class="main-title">🧳 SmartTour</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="subtitle">Nền tảng đặt tour thông minh — cá nhân hóa, linh hoạt và hỗ trợ khách trong suốt hành trình.</div>',
+        unsafe_allow_html=True
     )
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        keyword = st.text_input(
-            "Từ khóa",
-            placeholder="Ví dụ: Phú Quốc..."
-        )
+        st.markdown("""
+        <div class="feature-card">
+        <h3>🤖 AI cá nhân hóa</h3>
+        <p>Nhập ngân sách, thời gian và sở thích. Hệ thống đề xuất tour phù hợp.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     with col2:
-        destination = st.selectbox(
-            "Điểm đến",
-            destinations
-        )
+        st.markdown("""
+        <div class="feature-card">
+        <h3>🔄 Đổi lịch thông minh</h3>
+        <p>Khi thời tiết hoặc điều kiện thay đổi, app đề xuất phương án thay thế.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     with col3:
-        category = st.selectbox(
-            "Loại tour",
-            categories
-        )
+        st.markdown("""
+        <div class="feature-card">
+        <h3>🚨 Hỗ trợ sự cố</h3>
+        <p>Khách có thể báo sự cố và nhận hướng xử lý ngay trên app.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    filtered = []
-
-    for tour in tours:
-
-        match_keyword = (
-            keyword.lower() in tour["name"].lower()
-            or keyword.lower() in tour["destination"].lower()
-        )
-
-        match_destination = (
-            destination == "Tất cả"
-            or tour["destination"] == destination
-        )
-
-        match_category = (
-            category == "Tất cả"
-            or tour["category"] == category
-        )
-
-        if match_keyword and match_destination and match_category:
-            filtered.append(tour)
-
-    st.subheader(f"🌟 Tour nổi bật ({len(filtered)})")
-
-    if not filtered:
-        st.warning("Không tìm thấy tour phù hợp.")
+    st.write("")
+    st.subheader("⭐ Các tour nổi bật")
 
     cols = st.columns(3)
-
-    for index, tour in enumerate(filtered):
-
-        with cols[index % 3]:
-
-            st.markdown('<div class="tour-card">', unsafe_allow_html=True)
-
-            if tour["image"]:
-                st.image(
-                    tour["image"],
-                    use_container_width=True
-                )
-
-            st.markdown(
-                f'<span class="badge">{tour["category"]}</span>',
-                unsafe_allow_html=True
-            )
-
-            st.markdown(
-                f'<div class="tour-title">{tour["name"]}</div>',
-                unsafe_allow_html=True
-            )
-
-            st.write(f"📍 {tour['destination']}")
-            st.write(f"⏱️ {tour['duration']}")
-
-            st.markdown(
-                f'<div class="price">{format_price(tour["price"])}</div>',
-                unsafe_allow_html=True
-            )
-
-            if st.button(
-                "Xem chi tiết",
-                key=f"detail_{tour['id']}",
-                use_container_width=True
-            ):
+    for i, tour in enumerate(TOURS[:3]):
+        with cols[i]:
+            st.markdown(f"### {tour['name']}")
+            st.write(tour["description"])
+            st.write(f"**Từ {money(tour['price'])}/người**")
+            if st.button("Xem tour", key=f"home_tour_{tour['id']}"):
                 st.session_state.selected_tour = tour["id"]
-                st.session_state.page = "detail"
+                st.session_state.page = "TOURS"
                 st.rerun()
 
-            st.markdown("</div>", unsafe_allow_html=True)
+    st.divider()
+    st.subheader("⚙️ Quy trình sử dụng")
+    st.markdown("""
+    **1. Nhập nhu cầu → 2. Nhận đề xuất → 3. Chọn tour → 
+    4. Đặt tour → 5. Theo dõi & thay đổi lịch trình → 6. Hỗ trợ sự cố**
+    """)
 
 
 # ============================================================
-# TRANG TẤT CẢ TOUR
+# TÍNH NĂNG 1 — AI TẠO TOUR
 # ============================================================
+elif st.session_state.page == "AI":
+    st.title("🤖 Trợ lý AI cá nhân hóa tour")
+    st.write(
+        "Cho hệ thống biết nhu cầu của bạn. SmartTour sẽ chấm điểm và "
+        "đề xuất những tour phù hợp nhất."
+    )
 
-def tours_page():
-
-    st.title("🗺️ Tất cả tour du lịch")
-
-    tours = get_tours()
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        keyword = st.text_input(
-            "🔎 Tìm kiếm tour",
-            placeholder="Tên tour hoặc điểm đến..."
-        )
-
-    with col2:
-        sort_option = st.selectbox(
-            "Sắp xếp",
-            [
-                "Mặc định",
-                "Giá thấp → cao",
-                "Giá cao → thấp"
-            ]
-        )
-
-    filtered = [
-        tour for tour in tours
-        if keyword.lower() in tour["name"].lower()
-        or keyword.lower() in tour["destination"].lower()
-    ]
-
-    if sort_option == "Giá thấp → cao":
-        filtered = sorted(filtered, key=lambda x: x["price"])
-
-    elif sort_option == "Giá cao → thấp":
-        filtered = sorted(
-            filtered,
-            key=lambda x: x["price"],
-            reverse=True
-        )
-
-    for tour in filtered:
-
-        col1, col2 = st.columns([1, 2])
+    with st.form("ai_form"):
+        col1, col2 = st.columns(2)
 
         with col1:
-            st.image(
-                tour["image"],
-                use_container_width=True
+            destination = st.selectbox(
+                "Điểm đến mong muốn",
+                ["Không giới hạn"] + sorted(list(set(t["destination"] for t in TOURS)))
+            )
+
+            days = st.slider("Số ngày mong muốn", 2, 7, 3)
+
+            budget = st.number_input(
+                "Ngân sách / người (VNĐ)",
+                min_value=1000000,
+                max_value=50000000,
+                value=5000000,
+                step=500000
             )
 
         with col2:
-
-            st.markdown(
-                f"### {tour['name']}"
+            people = st.number_input(
+                "Số người",
+                min_value=1,
+                max_value=100,
+                value=2,
+                step=1
             )
 
-            st.write(
-                f"📍 **Điểm đến:** {tour['destination']}"
+            interests = st.multiselect(
+                "Bạn thích gì?",
+                ["biển", "nghỉ dưỡng", "ẩm thực", "văn hóa",
+                 "lịch sử", "check-in", "thiên nhiên", "vui chơi"],
+                default=["ẩm thực"]
             )
 
-            st.write(
-                f"⏱️ **Thời lượng:** {tour['duration']}"
+            style = st.selectbox(
+                "Phong cách chuyến đi",
+                ["Nghỉ dưỡng", "Khám phá", "Check-in", "Ẩm thực"]
             )
 
-            st.write(
-                f"🏷️ **Loại tour:** {tour['category']}"
-            )
-
-            st.markdown(
-                f"### {format_price(tour['price'])}"
-            )
-
-            st.write(tour["description"])
-
-            if st.button(
-                "Xem tour",
-                key=f"tour_{tour['id']}"
-            ):
-                st.session_state.selected_tour = tour["id"]
-                st.session_state.page = "detail"
-                st.rerun()
-
-        st.divider()
-
-
-# ============================================================
-# CHI TIẾT TOUR
-# ============================================================
-
-def detail_page():
-
-    tour_id = st.session_state.selected_tour
-
-    if not tour_id:
-        st.session_state.page = "tours"
-        st.rerun()
-
-    tour = get_tour(tour_id)
-
-    if not tour:
-        st.error("Không tìm thấy tour.")
-        return
-
-    st.title(tour["name"])
-
-    col1, col2 = st.columns([1.2, 1])
-
-    with col1:
-
-        st.image(
-            tour["image"],
+        submitted = st.form_submit_button(
+            "✨ Tạo đề xuất tour",
             use_container_width=True
         )
 
-    with col2:
+    if submitted:
+        results = recommend_tours(days, budget, people, interests, style)
 
-        st.markdown(
-            f"## {format_price(tour['price'])}"
-        )
+        if destination != "Không giới hạn":
+            filtered = [
+                item for item in results
+                if item[1]["destination"] == destination
+            ]
 
-        st.write(f"📍 **Điểm đến:** {tour['destination']}")
-        st.write(f"⏱️ **Thời lượng:** {tour['duration']}")
-        st.write(f"🏷️ **Loại tour:** {tour['category']}")
-        st.write(f"👥 **Số khách tối đa:** {tour['max_people']} người")
-
-        st.divider()
-
-        if st.button(
-            "🛒 ĐẶT TOUR NGAY",
-            type="primary",
-            use_container_width=True
-        ):
-            st.session_state.page = "booking"
-            st.rerun()
-
-    st.divider()
-
-    st.subheader("📝 Giới thiệu")
-
-    st.write(tour["description"])
-
-    st.subheader("🗓️ Lịch trình")
-
-    schedule_lines = tour["schedule"].split("\n")
-
-    for line in schedule_lines:
-        st.write(f"• {line}")
-
-
-# ============================================================
-# TRANG ĐẶT TOUR
-# ============================================================
-
-def booking_page():
-
-    tour_id = st.session_state.selected_tour
-    tour = get_tour(tour_id)
-
-    if not tour:
-        st.error("Không tìm thấy thông tin tour.")
-        return
-
-    st.title("🛒 Đặt tour")
-
-    col1, col2 = st.columns([1, 2])
-
-    with col1:
-
-        st.image(
-            tour["image"],
-            use_container_width=True
-        )
-
-        st.markdown(f"### {tour['name']}")
-        st.write(f"📍 {tour['destination']}")
-        st.write(f"⏱️ {tour['duration']}")
-
-        st.markdown(
-            f"**Giá:** {format_price(tour['price'])}/người"
-        )
-
-    with col2:
-
-        st.subheader("👤 Thông tin khách hàng")
-
-        with st.form("booking_form"):
-
-            customer_name = st.text_input(
-                "Họ và tên *",
-                placeholder="Nguyễn Văn A"
-            )
-
-            phone = st.text_input(
-                "Số điện thoại *",
-                placeholder="0901234567"
-            )
-
-            email = st.text_input(
-                "Email",
-                placeholder="email@example.com"
-            )
-
-            col_a, col_b = st.columns(2)
-
-            with col_a:
-                people = st.number_input(
-                    "Số lượng khách *",
-                    min_value=1,
-                    max_value=tour["max_people"],
-                    value=2,
-                    step=1
-                )
-
-            with col_b:
-                departure_date = st.date_input(
-                    "Ngày khởi hành *",
-                    min_value=date.today()
-                )
-
-            payment_method = st.selectbox(
-                "Phương thức thanh toán",
-                [
-                    "Thanh toán tại văn phòng",
-                    "Chuyển khoản ngân hàng",
-                    "Thanh toán online"
+            # Nếu có kết quả đúng điểm đến thì ưu tiên
+            if filtered:
+                results = filtered + [
+                    item for item in results if item not in filtered
                 ]
-            )
 
-            note = st.text_area(
-                "Ghi chú",
-                placeholder="Yêu cầu đặc biệt nếu có..."
-            )
+        st.session_state.custom_tour = results
 
-            total_price = tour["price"] * people
+    if st.session_state.custom_tour:
+        st.divider()
+        st.subheader("🎯 Tour được đề xuất cho bạn")
 
-            st.markdown("---")
+        for rank, (score, tour) in enumerate(st.session_state.custom_tour, start=1):
+            with st.container(border=True):
+                col1, col2 = st.columns([3, 1])
 
-            st.markdown(
-                f"### 💰 Tổng thanh toán: "
-                f"{format_price(total_price)}"
-            )
-
-            agree = st.checkbox(
-                "Tôi xác nhận thông tin đặt tour là chính xác."
-            )
-
-            submitted = st.form_submit_button(
-                "🎫 XÁC NHẬN ĐẶT TOUR",
-                type="primary",
-                use_container_width=True
-            )
-
-            if submitted:
-
-                errors = []
-
-                if not customer_name.strip():
-                    errors.append("Vui lòng nhập họ và tên.")
-
-                if not phone.strip():
-                    errors.append("Vui lòng nhập số điện thoại.")
-
-                if len(phone.strip()) < 9:
-                    errors.append(
-                        "Số điện thoại không hợp lệ."
+                with col1:
+                    st.markdown(f"### {rank}. {tour['name']}")
+                    st.write(tour["description"])
+                    st.write(
+                        f"📅 {tour['days']} ngày {tour['nights']} đêm  | "
+                        f"🚐 {tour['transport']}  | "
+                        f"🎯 Độ phù hợp: **{min(score, 100)}%**"
                     )
+                    st.write("**Lịch trình:**")
+                    for item in tour["schedule"]:
+                        st.write("• " + item)
 
-                if not agree:
-                    errors.append(
-                        "Vui lòng xác nhận thông tin đặt tour."
-                    )
-
-                if errors:
-
-                    for error in errors:
-                        st.error(error)
-
-                else:
-
-                    booking_code = create_booking(
-                        tour_id=tour["id"],
-                        customer_name=customer_name.strip(),
-                        phone=phone.strip(),
-                        email=email.strip(),
-                        people=people,
-                        departure_date=departure_date.strftime(
-                            "%d/%m/%Y"
-                        ),
-                        payment_method=payment_method,
-                        note=note.strip(),
-                        total_price=total_price
-                    )
-
-                    st.session_state.booking_code = booking_code
-                    st.session_state.page = "success"
-                    st.rerun()
-
-
-# ============================================================
-# TRANG ĐẶT TOUR THÀNH CÔNG
-# ============================================================
-
-def success_page():
-
-    booking_code = st.session_state.booking_code
-
-    if not booking_code:
-        st.session_state.page = "home"
-        st.rerun()
-
-    booking = get_booking(booking_code)
-
-    if not booking:
-        st.error("Không tìm thấy đơn đặt tour.")
-        return
-
-    st.markdown(
-        """
-        <div class="success-box">
-            <h2>🎉 Đặt tour thành công!</h2>
-            <p>
-                Cảm ơn bạn đã lựa chọn VietTour.
-                Nhân viên sẽ liên hệ để xác nhận thông tin.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.write("")
-
-    st.markdown(
-        f"""
-        ### 🎫 Mã đặt tour: `{booking['booking_code']}`
-        """
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        st.markdown("### 👤 Thông tin khách hàng")
-
-        st.write(
-            f"**Họ tên:** {booking['customer_name']}"
-        )
-
-        st.write(
-            f"**Số điện thoại:** {booking['phone']}"
-        )
-
-        st.write(
-            f"**Email:** {booking['email'] or 'Không có'}"
-        )
-
-        st.write(
-            f"**Số khách:** {booking['people']}"
-        )
-
-    with col2:
-
-        st.markdown("### 🗺️ Thông tin tour")
-
-        st.write(
-            f"**Tour:** {booking['tour_name']}"
-        )
-
-        st.write(
-            f"**Ngày khởi hành:** {booking['departure_date']}"
-        )
-
-        st.write(
-            f"**Thanh toán:** {booking['payment_method']}"
-        )
-
-        st.write(
-            f"**Tổng tiền:** {format_price(booking['total_price'])}"
-        )
-
-        st.write(
-            f"**Trạng thái:** {booking['status']}"
-        )
-
-    st.divider()
-
-    st.info(
-        "Vui lòng lưu mã đặt tour để tra cứu hoặc liên hệ "
-        "với VietTour khi cần hỗ trợ."
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button(
-            "🏠 Về trang chủ",
-            use_container_width=True
-        ):
-            st.session_state.page = "home"
-            st.rerun()
-
-    with col2:
-        if st.button(
-            "🔎 Tra cứu đơn",
-            use_container_width=True
-        ):
-            st.session_state.page = "lookup"
-            st.rerun()
-
-
-# ============================================================
-# TRA CỨU ĐƠN
-# ============================================================
-
-def lookup_page():
-
-    st.title("🔎 Tra cứu đặt tour")
-
-    st.write(
-        "Nhập mã đặt tour để xem thông tin đơn hàng."
-    )
-
-    booking_code = st.text_input(
-        "Mã đặt tour",
-        placeholder="Ví dụ: VT260928ABC123"
-    )
-
-    if st.button(
-        "🔎 Tra cứu",
-        type="primary"
-    ):
-
-        if not booking_code.strip():
-
-            st.warning(
-                "Vui lòng nhập mã đặt tour."
-            )
-
-        else:
-
-            booking = get_booking(
-                booking_code.strip().upper()
-            )
-
-            if not booking:
-
-                st.error(
-                    "Không tìm thấy đơn đặt tour."
-                )
-
-            else:
-
-                st.success(
-                    "Đã tìm thấy đơn đặt tour."
-                )
-
-                st.markdown(
-                    f"## 🎫 {booking['booking_code']}"
-                )
-
-                st.write(
-                    f"**Tour:** {booking['tour_name']}"
-                )
-
-                st.write(
-                    f"**Điểm đến:** {booking['destination']}"
-                )
-
-                st.write(
-                    f"**Khách hàng:** {booking['customer_name']}"
-                )
-
-                st.write(
-                    f"**Số khách:** {booking['people']}"
-                )
-
-                st.write(
-                    f"**Ngày khởi hành:** "
-                    f"{booking['departure_date']}"
-                )
-
-                st.write(
-                    f"**Tổng tiền:** "
-                    f"{format_price(booking['total_price'])}"
-                )
-
-                st.write(
-                    f"**Trạng thái:** {booking['status']}"
-                )
-
-                if booking["status"] != "Đã hủy":
-
-                    st.divider()
+                with col2:
+                    st.markdown(f"### {money(tour['price'])}")
+                    st.caption("Giá/người")
 
                     if st.button(
-                        "❌ Hủy đặt tour",
-                        type="secondary"
+                        "Đặt tour này",
+                        key=f"ai_book_{tour['id']}",
+                        use_container_width=True
                     ):
-
-                        cancel_booking(
-                            booking["booking_code"]
-                        )
-
-                        st.success(
-                            "Đã hủy đơn đặt tour."
-                        )
-
+                        st.session_state.selected_tour = tour["id"]
+                        st.session_state.page = "TOURS"
                         st.rerun()
 
 
 # ============================================================
-# TRANG QUẢN LÝ
+# KHÁM PHÁ & ĐẶT TOUR
 # ============================================================
+elif st.session_state.page == "TOURS":
+    st.title("🗺️ Khám phá & đặt tour")
 
-def admin_page():
+    if st.session_state.selected_tour:
+        selected = find_tour_by_id(st.session_state.selected_tour)
+        st.success(f"Đang chọn: {selected['name']}")
 
-    st.title("📊 Quản lý đơn đặt tour")
+    filter_col1, filter_col2 = st.columns(2)
 
-    st.warning(
-        "Đây là khu vực quản lý demo. "
-        "Khi triển khai thực tế cần bổ sung hệ thống đăng nhập quản trị."
-    )
+    with filter_col1:
+        destination_filter = st.selectbox(
+            "Lọc theo điểm đến",
+            ["Tất cả"] + sorted(list(set(t["destination"] for t in TOURS)))
+        )
 
-    bookings = get_all_bookings()
+    with filter_col2:
+        max_price = st.slider(
+            "Ngân sách tối đa / người",
+            1000000,
+            10000000,
+            6000000,
+            step=500000
+        )
 
-    if not bookings:
+    filtered_tours = [
+        t for t in TOURS
+        if (destination_filter == "Tất cả" or t["destination"] == destination_filter)
+        and t["price"] <= max_price
+    ]
 
-        st.info("Chưa có đơn đặt tour.")
-        return
-
-    # Thống kê
-    total_bookings = len(bookings)
-
-    confirmed = len([
-        x for x in bookings
-        if x["status"] == "Đã xác nhận"
-    ])
-
-    pending = len([
-        x for x in bookings
-        if x["status"] == "Chờ xác nhận"
-    ])
-
-    cancelled = len([
-        x for x in bookings
-        if x["status"] == "Đã hủy"
-    ])
-
-    revenue = sum(
-        x["total_price"]
-        for x in bookings
-        if x["status"] != "Đã hủy"
-    )
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    col1.metric(
-        "Tổng đơn",
-        total_bookings
-    )
-
-    col2.metric(
-        "Chờ xác nhận",
-        pending
-    )
-
-    col3.metric(
-        "Đã xác nhận",
-        confirmed
-    )
-
-    col4.metric(
-        "Đã hủy",
-        cancelled
-    )
-
-    col5.metric(
-        "Doanh thu",
-        format_price(revenue)
-    )
-
-    st.divider()
-
-    st.subheader("📋 Danh sách đơn đặt tour")
-
-    for booking in bookings:
-
-        with st.expander(
-            f"🎫 {booking['booking_code']} "
-            f"— {booking['customer_name']} "
-            f"— {booking['status']}"
-        ):
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-
-                st.write(
-                    f"**Tour:** {booking['tour_name']}"
-                )
-
-                st.write(
-                    f"**Khách hàng:** "
-                    f"{booking['customer_name']}"
-                )
-
-                st.write(
-                    f"**Điện thoại:** "
-                    f"{booking['phone']}"
-                )
-
-                st.write(
-                    f"**Email:** "
-                    f"{booking['email'] or 'Không có'}"
-                )
-
-            with col2:
-
-                st.write(
-                    f"**Số khách:** "
-                    f"{booking['people']}"
-                )
-
-                st.write(
-                    f"**Ngày đi:** "
-                    f"{booking['departure_date']}"
-                )
-
-                st.write(
-                    f"**Thanh toán:** "
-                    f"{booking['payment_method']}"
-                )
-
-                st.write(
-                    f"**Tổng tiền:** "
-                    f"{format_price(booking['total_price'])}"
-                )
-
-            if booking["note"]:
-
-                st.info(
-                    f"📝 Ghi chú: {booking['note']}"
-                )
-
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-def footer():
-
-    st.markdown(
-        """
-        <div class="footer">
-            <hr>
-            <p>
-                🌴 <b>VietTour</b> – Nền tảng đặt tour du lịch
-            </p>
-            <p>
-                © 2026 VietTour. All rights reserved.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-
-    init_database()
-    load_css()
-    sidebar()
-
-    if st.session_state.page == "home":
-        home_page()
-
-    elif st.session_state.page == "tours":
-        tours_page()
-
-    elif st.session_state.page == "detail":
-        detail_page()
-
-    elif st.session_state.page == "booking":
-        booking_page()
-
-    elif st.session_state.page == "success":
-        success_page()
-
-    elif st.session_state.page == "lookup":
-        lookup_page()
-
-    elif st.session_state.page == "admin":
-        admin_page()
-
+    if not filtered_tours:
+        st.warning("Không có tour phù hợp với bộ lọc.")
     else:
-        home_page()
+        for tour in filtered_tours:
+            with st.container(border=True):
+                col1, col2 = st.columns([4, 1])
 
-    footer()
+                with col1:
+                    st.subheader(tour["name"])
+                    st.write(tour["description"])
+                    st.write(
+                        f"📅 {tour['days']} ngày {tour['nights']} đêm | "
+                        f"🏷️ {', '.join(tour['category'])}"
+                    )
+
+                with col2:
+                    st.markdown(f"### {money(tour['price'])}")
+                    st.caption("/ người")
+
+                    if st.button(
+                        "Chọn tour",
+                        key=f"select_{tour['id']}",
+                        use_container_width=True
+                    ):
+                        st.session_state.selected_tour = tour["id"]
+                        st.rerun()
+
+                if st.session_state.selected_tour == tour["id"]:
+                    st.divider()
+                    st.write("### 📅 Lịch trình")
+                    for item in tour["schedule"]:
+                        st.write("• " + item)
+
+                    with st.form(f"booking_form_{tour['id']}"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            customer_name = st.text_input("Họ và tên")
+                            customer_phone = st.text_input("Số điện thoại")
+                            departure_date = st.date_input(
+                                "Ngày khởi hành",
+                                value=date.today() + timedelta(days=7),
+                                min_value=date.today() + timedelta(days=1)
+                            )
+
+                        with c2:
+                            customer_email = st.text_input("Email")
+                            number_people = st.number_input(
+                                "Số lượng khách",
+                                min_value=1,
+                                max_value=100,
+                                value=2
+                            )
+                            note = st.text_area("Yêu cầu đặc biệt")
+
+                        total = tour["price"] * number_people
+                        st.info(f"💰 Tổng tạm tính: **{money(total)}**")
+
+                        confirm = st.form_submit_button(
+                            "✅ Xác nhận đặt tour",
+                            use_container_width=True
+                        )
+
+                    if confirm:
+                        if not customer_name.strip() or not customer_phone.strip():
+                            st.error("Vui lòng nhập họ tên và số điện thoại.")
+                        else:
+                            st.session_state.booking = {
+                                "code": "ST" + str(random.randint(100000, 999999)),
+                                "tour": tour["name"],
+                                "date": departure_date,
+                                "people": number_people,
+                                "name": customer_name,
+                                "phone": customer_phone,
+                                "email": customer_email,
+                                "note": note,
+                                "total": total,
+                                "status": "Đã xác nhận"
+                            }
+                            st.success(
+                                f"Đặt tour thành công! Mã đặt tour: "
+                                f"**{st.session_state.booking['code']}**"
+                            )
 
 
-if __name__ == "__main__":
-    main()
+# ============================================================
+# TÍNH NĂNG 2 — ĐỔI LỊCH TRÌNH THÔNG MINH
+# ============================================================
+elif st.session_state.page == "CHANGE":
+    st.title("🔄 Đổi lịch trình thông minh")
+    st.write(
+        "Mô phỏng tình huống tour bị ảnh hưởng bởi thời tiết, "
+        "đóng cửa điểm tham quan hoặc thay đổi điều kiện vận hành."
+    )
+
+    if not st.session_state.booking:
+        st.warning("Bạn chưa có đơn đặt tour. Hãy đặt một tour trước.")
+    else:
+        booking = st.session_state.booking
+        st.success(
+            f"Đơn **{booking['code']}** — {booking['tour']} — "
+            f"{booking['people']} khách"
+        )
+
+        reason = st.selectbox(
+            "Lý do cần thay đổi",
+            [
+                "🌧️ Thời tiết xấu",
+                "🚧 Điểm tham quan tạm đóng cửa",
+                "🚌 Phương tiện bị thay đổi",
+                "👥 Khách muốn thay đổi nhu cầu",
+                "⏰ Đoàn bị trễ thời gian"
+            ]
+        )
+
+        st.subheader("🤖 Phương án SmartTour đề xuất")
+
+        alternatives = {
+            "🌧️ Thời tiết xấu": [
+                ("Phương án A", "Thay hoạt động ngoài trời bằng bảo tàng + trải nghiệm ẩm thực.", "Giữ nguyên thời lượng"),
+                ("Phương án B", "Chuyển điểm tham quan ngoài trời sang hoạt động trong nhà.", "Giảm 1 hoạt động"),
+                ("Phương án C", "Dời hoạt động ngoài trời sang ngày tiếp theo.", "Điều chỉnh toàn bộ lịch trình")
+            ],
+            "🚧 Điểm tham quan tạm đóng cửa": [
+                ("Phương án A", "Thay bằng một điểm tham quan tương đương gần đó.", "Không phát sinh"),
+                ("Phương án B", "Tăng thời gian trải nghiệm tại điểm tiếp theo.", "Không đổi tuyến"),
+                ("Phương án C", "Điều chỉnh lịch trình theo điểm tham quan dự phòng.", "Có thay đổi thứ tự")
+            ],
+            "🚌 Phương tiện bị thay đổi": [
+                ("Phương án A", "Điều chuyển sang xe dự phòng cùng tiêu chuẩn.", "Ít ảnh hưởng"),
+                ("Phương án B", "Chia đoàn thành 2 xe nhỏ.", "Có thay đổi phương tiện"),
+                ("Phương án C", "Điều chỉnh giờ khởi hành.", "Thay đổi thời gian")
+            ],
+            "👥 Khách muốn thay đổi nhu cầu": [
+                ("Phương án A", "Bỏ một hoạt động và tăng thời gian tự do.", "Linh hoạt"),
+                ("Phương án B", "Thay hoạt động hiện tại bằng trải nghiệm phù hợp sở thích.", "Cá nhân hóa"),
+                ("Phương án C", "Giữ lịch trình chính, thêm hoạt động tự chọn.", "Có thể phát sinh phí")
+            ],
+            "⏰ Đoàn bị trễ thời gian": [
+                ("Phương án A", "Rút ngắn thời gian tại điểm hiện tại.", "Giữ toàn bộ lịch trình"),
+                ("Phương án B", "Bỏ một điểm ít ưu tiên.", "Giảm 1 điểm"),
+                ("Phương án C", "Điều chỉnh giờ ăn và thời gian tham quan.", "Tối ưu thời gian")
+            ]
+        }
+
+        selected_option = None
+
+        for title, desc, impact in alternatives[reason]:
+            with st.container(border=True):
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    st.markdown(f"### {title}")
+                    st.write(desc)
+                    st.caption("Ảnh hưởng: " + impact)
+                with c2:
+                    if st.button("Chọn", key=f"change_{title}"):
+                        selected_option = title
+                        st.session_state.change_result = {
+                            "reason": reason,
+                            "option": title,
+                            "description": desc
+                        }
+
+        if "change_result" in st.session_state:
+            result = st.session_state.change_result
+            st.divider()
+            st.markdown(
+                f"""
+                <div class="success-box">
+                <h3>✅ Đã chọn phương án</h3>
+                <b>Lý do:</b> {result['reason']}<br>
+                <b>Phương án:</b> {result['option']}<br>
+                <b>Xử lý:</b> {result['description']}<br><br>
+                📢 Hệ thống có thể gửi thông báo mới cho khách, HDV và tài xế.
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+
+# ============================================================
+# TÍNH NĂNG 5 — TRỢ LÝ XỬ LÝ SỰ CỐ
+# ============================================================
+elif st.session_state.page == "INCIDENT":
+    st.title("🚨 Trợ lý xử lý sự cố du lịch")
+    st.write(
+        "Khách chọn vấn đề đang gặp phải. Hệ thống đưa ra hướng xử lý "
+        "ban đầu và xác định người cần được thông báo."
+    )
+
+    incident = st.selectbox(
+        "Bạn đang gặp vấn đề gì?",
+        [
+            "🚌 Trễ xe / không thấy xe đón",
+            "📍 Lạc đoàn",
+            "🎒 Thất lạc hành lý / đồ cá nhân",
+            "🏨 Vấn đề phòng khách sạn",
+            "🌧️ Thời tiết ảnh hưởng lịch trình",
+            "📞 Không liên hệ được với HDV",
+            "🆘 Tình huống khẩn cấp"
+        ]
+    )
+
+    detail = st.text_area(
+        "Mô tả thêm tình huống",
+        placeholder="Ví dụ: Tôi đang ở sảnh khách sạn nhưng chưa thấy xe..."
+    )
+
+    if st.button("🚨 Gửi yêu cầu hỗ trợ", use_container_width=True):
+        responses = {
+            "🚌 Trễ xe / không thấy xe đón": {
+                "level": "Cần điều hành kiểm tra ngay",
+                "action": [
+                    "Kiểm tra vị trí xe và thời gian đón.",
+                    "Liên hệ tài xế/HDV.",
+                    "Gửi vị trí hiện tại của khách cho điều hành.",
+                    "Thông báo thời gian đón dự kiến cho khách."
+                ]
+            },
+            "📍 Lạc đoàn": {
+                "level": "Ưu tiên cao",
+                "action": [
+                    "Khách ở nguyên vị trí an toàn nếu có thể.",
+                    "Gửi vị trí hiện tại.",
+                    "Liên hệ HDV và điều hành.",
+                    "Không tự ý di chuyển đến địa điểm khác khi chưa được hướng dẫn."
+                ]
+            },
+            "🎒 Thất lạc hành lý / đồ cá nhân": {
+                "level": "Cần hỗ trợ",
+                "action": [
+                    "Xác định địa điểm cuối cùng nhìn thấy đồ.",
+                    "Thông báo cho HDV.",
+                    "Liên hệ địa điểm/nhà hàng/khách sạn liên quan.",
+                    "Ghi nhận thông tin tài sản thất lạc."
+                ]
+            },
+            "🏨 Vấn đề phòng khách sạn": {
+                "level": "Điều hành/HDV hỗ trợ",
+                "action": [
+                    "Ghi nhận tình trạng phòng.",
+                    "Liên hệ lễ tân.",
+                    "Yêu cầu phương án khắc phục hoặc đổi phòng nếu cần.",
+                    "Cập nhật kết quả cho khách."
+                ]
+            },
+            "🌧️ Thời tiết ảnh hưởng lịch trình": {
+                "level": "Điều hành cần đánh giá",
+                "action": [
+                    "Kiểm tra điều kiện thời tiết.",
+                    "Đánh giá các hoạt động bị ảnh hưởng.",
+                    "Đề xuất điểm thay thế.",
+                    "Cập nhật lịch trình cho toàn đoàn."
+                ]
+            },
+            "📞 Không liên hệ được với HDV": {
+                "level": "Cần điều hành kiểm tra",
+                "action": [
+                    "Kiểm tra trạng thái HDV.",
+                    "Liên hệ qua kênh dự phòng.",
+                    "Điều hành liên hệ trưởng đoàn/khách.",
+                    "Bố trí nhân sự hỗ trợ nếu cần."
+                ]
+            },
+            "🆘 Tình huống khẩn cấp": {
+                "level": "KHẨN CẤP",
+                "action": [
+                    "Ưu tiên đảm bảo an toàn cho người gặp nạn.",
+                    "Liên hệ dịch vụ khẩn cấp phù hợp tại địa phương.",
+                    "Thông báo ngay cho HDV và điều hành.",
+                    "Cung cấp vị trí và thông tin cần thiết."
+                ]
+            }
+        }
+
+        result = responses[incident]
+        st.session_state.incident_result = result
+
+    if st.session_state.incident_result:
+        result = st.session_state.incident_result
+
+        st.divider()
+        st.markdown(
+            f"""
+            <div class="incident-box">
+            <h3>🚨 Mức độ: {result['level']}</h3>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        st.subheader("🛠️ Hướng xử lý đề xuất")
+        for action in result["action"]:
+            st.write("✅ " + action)
+
+        if detail:
+            st.info(f"Thông tin khách cung cấp: {detail}")
+
+        st.success(
+            "Yêu cầu đã được ghi nhận. Trong phiên bản triển khai thực tế, "
+            "hệ thống có thể gửi thông báo trực tiếp đến điều hành và HDV."
+        )
+
+
+# ============================================================
+# ĐƠN ĐẶT TOUR
+# ============================================================
+elif st.session_state.page == "BOOKING":
+    st.title("📋 Đơn đặt tour")
+
+    if not st.session_state.booking:
+        st.info("Bạn chưa có đơn đặt tour nào trong phiên làm việc này.")
+        st.button(
+            "🗺️ Đi đặt tour",
+            on_click=lambda: st.session_state.update(page="TOURS")
+        )
+    else:
+        booking = st.session_state.booking
+
+        st.markdown(
+            f"""
+            <div class="success-box">
+            <h3>✅ Đặt tour thành công</h3>
+            <b>Mã đặt tour:</b> {booking['code']}<br>
+            <b>Tour:</b> {booking['tour']}<br>
+            <b>Khách hàng:</b> {booking['name']}<br>
+            <b>Ngày khởi hành:</b> {booking['date'].strftime('%d/%m/%Y')}<br>
+            <b>Số khách:</b> {booking['people']}<br>
+            <b>Tổng tiền:</b> {money(booking['total'])}<br>
+            <b>Trạng thái:</b> {booking['status']}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        st.write("")
+        st.subheader("💡 Sau khi đặt tour")
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            st.info("🔄 **Đổi lịch**\n\nXử lý khi tour có thay đổi.")
+
+        with c2:
+            st.warning("🚨 **Báo sự cố**\n\nGửi yêu cầu hỗ trợ cho điều hành.")
+
+        with c3:
+            st.success("📱 **Thông báo**\n\nPhiên bản thực tế có thể gửi thông báo realtime.")
+
+# Footer
+st.divider()
+st.caption(
+    "SmartTour Demo • Streamlit • Phiên bản không kết nối cơ sở dữ liệu/API • "
+    "Có thể mở rộng MySQL, AI API, bản đồ và thanh toán."
+)
