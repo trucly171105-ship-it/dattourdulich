@@ -37,7 +37,7 @@ try:
     DB_NAME = st.secrets["mysql"]["database"]
 except Exception:
     DB_USER = "avnadmin"
-    DB_PASSWORD = "AVNS_cyQyD8Ez8n3Ggy-ax8l."
+    DB_PASSWORD = "AVNS_cyQyD8Ez8n3Ggy-ax8l"
     DB_HOST = "mysql-d660cbf-trucly171105-b953.k.aivencloud.com"
     DB_PORT = 27221
     DB_NAME = "defaultdb"
