@@ -87,9 +87,52 @@ TOURS = [
         "transport": "Máy bay + xe du lịch",
         "description": "Bãi Sao, Hòn Thơm, chợ đêm và trải nghiệm ẩm thực địa phương.",
         "schedule": [
-            "Ngày 1: Đón sân bay → nhận phòng → Bãi Sao → ăn tối → chợ đêm",
-            "Ngày 2: Hòn Thơm → cáp treo → vui chơi → ăn tối hải sản",
-            "Ngày 3: Tham quan trung tâm → mua đặc sản → tiễn sân bay"
+            {
+                "day": "Ngày 1",
+                "title": "Đón sân bay - Bãi Sao - Chợ đêm",
+                "places": ["Sân bay Phú Quốc", "Bãi Sao", "Chợ đêm Phú Quốc"],
+                "activities": [
+                    "Đón khách tại sân bay Phú Quốc",
+                    "Di chuyển về khách sạn và nhận phòng",
+                    "Tắm biển, nghỉ ngơi và chụp ảnh tại Bãi Sao",
+                    "Thưởng thức bữa tối với đặc sản địa phương",
+                    "Tự do khám phá Chợ đêm Phú Quốc"
+                ],
+                "meals": ["Bữa tối"],
+                "transport": "Xe du lịch",
+                "time": "08:00 - 21:00"
+            },
+            {
+                "day": "Ngày 2",
+                "title": "Hòn Thơm - Cáp treo - Vui chơi biển",
+                "places": ["Ga An Thới", "Cáp treo Hòn Thơm", "Hòn Thơm"],
+                "activities": [
+                    "Ăn sáng tại khách sạn",
+                    "Di chuyển đến Ga An Thới",
+                    "Trải nghiệm cáp treo Hòn Thơm",
+                    "Tự do vui chơi và tham gia các hoạt động tại Hòn Thơm",
+                    "Thưởng thức hải sản",
+                    "Trở về khách sạn nghỉ ngơi"
+                ],
+                "meals": ["Bữa sáng", "Bữa trưa", "Bữa tối"],
+                "transport": "Xe du lịch + cáp treo",
+                "time": "07:00 - 20:30"
+            },
+            {
+                "day": "Ngày 3",
+                "title": "Trung tâm Phú Quốc - Mua đặc sản - Tiễn sân bay",
+                "places": ["Trung tâm Dương Đông", "Cửa hàng đặc sản", "Sân bay Phú Quốc"],
+                "activities": [
+                    "Ăn sáng và trả phòng",
+                    "Tham quan khu vực trung tâm Dương Đông",
+                    "Mua đặc sản và quà lưu niệm",
+                    "Di chuyển ra sân bay",
+                    "Kết thúc chương trình tour"
+                ],
+                "meals": ["Bữa sáng"],
+                "transport": "Xe du lịch",
+                "time": "07:30 - 14:00"
+            }
         ]
     },
     {
@@ -104,10 +147,68 @@ TOURS = [
         "transport": "Máy bay + xe du lịch",
         "description": "Bà Nà Hills, phố cổ Hội An, biển Mỹ Khê và ẩm thực miền Trung.",
         "schedule": [
-            "Ngày 1: Đà Nẵng → nhận phòng → biển Mỹ Khê → cầu Rồng",
-            "Ngày 2: Bà Nà Hills → Cầu Vàng → trở về Đà Nẵng",
-            "Ngày 3: Ngũ Hành Sơn → Hội An → phố cổ → thả đèn",
-            "Ngày 4: Mua đặc sản → tiễn sân bay"
+            {
+                "day": "Ngày 1",
+                "title": "Đến Đà Nẵng - Biển Mỹ Khê - Cầu Rồng",
+                "places": ["Sân bay Đà Nẵng", "Biển Mỹ Khê", "Cầu Rồng"],
+                "activities": [
+                    "Đón khách tại sân bay Đà Nẵng",
+                    "Di chuyển về khách sạn và nhận phòng",
+                    "Tự do tắm biển Mỹ Khê",
+                    "Khám phá khu vực ven sông Hàn",
+                    "Check-in Cầu Rồng"
+                ],
+                "meals": ["Bữa tối"],
+                "transport": "Xe du lịch",
+                "time": "09:00 - 21:00"
+            },
+            {
+                "day": "Ngày 2",
+                "title": "Bà Nà Hills - Cầu Vàng",
+                "places": ["Bà Nà Hills", "Cầu Vàng"],
+                "activities": [
+                    "Ăn sáng tại khách sạn",
+                    "Khởi hành đi Bà Nà Hills",
+                    "Trải nghiệm cáp treo",
+                    "Tham quan Cầu Vàng",
+                    "Khám phá khu vui chơi và cảnh quan Bà Nà Hills",
+                    "Trở về Đà Nẵng"
+                ],
+                "meals": ["Bữa sáng", "Bữa trưa", "Bữa tối"],
+                "transport": "Xe du lịch + cáp treo",
+                "time": "07:00 - 20:00"
+            },
+            {
+                "day": "Ngày 3",
+                "title": "Ngũ Hành Sơn - Hội An - Phố cổ",
+                "places": ["Ngũ Hành Sơn", "Phố cổ Hội An"],
+                "activities": [
+                    "Ăn sáng tại khách sạn",
+                    "Tham quan danh thắng Ngũ Hành Sơn",
+                    "Di chuyển đến Hội An",
+                    "Khám phá phố cổ Hội An",
+                    "Thưởng thức ẩm thực địa phương",
+                    "Tham gia hoạt động thả đèn vào buổi tối"
+                ],
+                "meals": ["Bữa sáng", "Bữa trưa", "Bữa tối"],
+                "transport": "Xe du lịch",
+                "time": "07:30 - 21:00"
+            },
+            {
+                "day": "Ngày 4",
+                "title": "Mua đặc sản - Tiễn sân bay",
+                "places": ["Trung tâm Đà Nẵng", "Cửa hàng đặc sản", "Sân bay Đà Nẵng"],
+                "activities": [
+                    "Ăn sáng và trả phòng",
+                    "Tự do mua sắm",
+                    "Mua đặc sản miền Trung",
+                    "Di chuyển ra sân bay",
+                    "Kết thúc chương trình tour"
+                ],
+                "meals": ["Bữa sáng"],
+                "transport": "Xe du lịch",
+                "time": "07:30 - 14:00"
+            }
         ]
     },
     {
@@ -122,9 +223,51 @@ TOURS = [
         "transport": "Xe du lịch",
         "description": "Săn mây, đồi chè, vườn hoa và trải nghiệm cà phê Đà Lạt.",
         "schedule": [
-            "Ngày 1: Đà Lạt → nhận phòng → quảng trường → chợ đêm",
-            "Ngày 2: Săn mây → đồi chè → vườn hoa → cà phê",
-            "Ngày 3: Dinh thự → mua đặc sản → kết thúc tour"
+            {
+                "day": "Ngày 1",
+                "title": "Đến Đà Lạt - Quảng trường - Chợ đêm",
+                "places": ["Quảng trường Lâm Viên", "Chợ đêm Đà Lạt"],
+                "activities": [
+                    "Đến Đà Lạt và di chuyển về khách sạn",
+                    "Nhận phòng, nghỉ ngơi",
+                    "Tham quan Quảng trường Lâm Viên",
+                    "Khám phá Chợ đêm Đà Lạt",
+                    "Thưởng thức đặc sản địa phương"
+                ],
+                "meals": ["Bữa tối"],
+                "transport": "Xe du lịch",
+                "time": "13:00 - 21:00"
+            },
+            {
+                "day": "Ngày 2",
+                "title": "Săn mây - Đồi chè - Vườn hoa - Cà phê",
+                "places": ["Điểm săn mây", "Đồi chè", "Vườn hoa", "Quán cà phê"],
+                "activities": [
+                    "Khởi hành sớm để săn mây",
+                    "Chụp ảnh và ngắm cảnh",
+                    "Tham quan đồi chè",
+                    "Khám phá vườn hoa",
+                    "Trải nghiệm cà phê Đà Lạt"
+                ],
+                "meals": ["Bữa sáng", "Bữa trưa", "Bữa tối"],
+                "transport": "Xe du lịch",
+                "time": "05:00 - 20:00"
+            },
+            {
+                "day": "Ngày 3",
+                "title": "Tham quan dinh thự - Mua đặc sản - Kết thúc",
+                "places": ["Dinh thự", "Khu mua sắm đặc sản"],
+                "activities": [
+                    "Ăn sáng và trả phòng",
+                    "Tham quan dinh thự",
+                    "Mua đặc sản Đà Lạt",
+                    "Tự do chụp ảnh và mua sắm",
+                    "Kết thúc chương trình tour"
+                ],
+                "meals": ["Bữa sáng"],
+                "transport": "Xe du lịch",
+                "time": "07:30 - 14:00"
+            }
         ]
     },
     {
@@ -139,9 +282,52 @@ TOURS = [
         "transport": "Máy bay + xe du lịch",
         "description": "Biển Nha Trang, đảo, vui chơi và khám phá ẩm thực.",
         "schedule": [
-            "Ngày 1: Nhận phòng → biển Nha Trang → ăn tối",
-            "Ngày 2: Tour đảo → vui chơi → ăn hải sản",
-            "Ngày 3: Tham quan thành phố → mua đặc sản → kết thúc"
+            {
+                "day": "Ngày 1",
+                "title": "Đến Nha Trang - Biển - Thành phố",
+                "places": ["Khách sạn", "Biển Nha Trang"],
+                "activities": [
+                    "Đón khách và nhận phòng",
+                    "Nghỉ ngơi tại khách sạn",
+                    "Tự do tắm biển Nha Trang",
+                    "Khám phá khu vực trung tâm",
+                    "Thưởng thức bữa tối"
+                ],
+                "meals": ["Bữa tối"],
+                "transport": "Xe du lịch",
+                "time": "13:00 - 20:30"
+            },
+            {
+                "day": "Ngày 2",
+                "title": "Tour đảo - Vui chơi - Hải sản",
+                "places": ["Các đảo trong vịnh Nha Trang", "Khu vui chơi biển"],
+                "activities": [
+                    "Ăn sáng tại khách sạn",
+                    "Khởi hành tham gia tour đảo",
+                    "Đi tàu và ngắm cảnh vịnh",
+                    "Tự do vui chơi, tắm biển",
+                    "Thưởng thức hải sản",
+                    "Trở về khách sạn"
+                ],
+                "meals": ["Bữa sáng", "Bữa trưa", "Bữa tối"],
+                "transport": "Xe du lịch + tàu",
+                "time": "07:00 - 20:00"
+            },
+            {
+                "day": "Ngày 3",
+                "title": "Tham quan thành phố - Mua đặc sản",
+                "places": ["Trung tâm Nha Trang", "Cửa hàng đặc sản"],
+                "activities": [
+                    "Ăn sáng và trả phòng",
+                    "Tham quan các điểm trong thành phố",
+                    "Mua đặc sản và quà lưu niệm",
+                    "Dùng bữa trưa",
+                    "Kết thúc chương trình"
+                ],
+                "meals": ["Bữa sáng", "Bữa trưa"],
+                "transport": "Xe du lịch",
+                "time": "07:30 - 14:00"
+            }
         ]
     },
     {
@@ -156,9 +342,51 @@ TOURS = [
         "transport": "Xe du lịch",
         "description": "Đại Nội, lăng vua, chùa Thiên Mụ và ẩm thực cung đình.",
         "schedule": [
-            "Ngày 1: Đại Nội → Đông Ba → thưởng thức ẩm thực Huế",
-            "Ngày 2: Lăng vua → chùa Thiên Mụ → sông Hương",
-            "Ngày 3: Mua đặc sản → tham quan tự do → kết thúc"
+            {
+                "day": "Ngày 1",
+                "title": "Đại Nội - Chợ Đông Ba - Ẩm thực Huế",
+                "places": ["Đại Nội Huế", "Chợ Đông Ba"],
+                "activities": [
+                    "Đón khách và nhận phòng",
+                    "Tham quan Đại Nội Huế",
+                    "Tìm hiểu kiến trúc và lịch sử tại khu di tích",
+                    "Khám phá Chợ Đông Ba",
+                    "Thưởng thức các món ăn đặc trưng của Huế"
+                ],
+                "meals": ["Bữa trưa", "Bữa tối"],
+                "transport": "Xe du lịch",
+                "time": "08:00 - 20:30"
+            },
+            {
+                "day": "Ngày 2",
+                "title": "Lăng vua - Chùa Thiên Mụ - Sông Hương",
+                "places": ["Lăng vua", "Chùa Thiên Mụ", "Sông Hương"],
+                "activities": [
+                    "Ăn sáng tại khách sạn",
+                    "Tham quan lăng vua",
+                    "Tìm hiểu giá trị lịch sử và kiến trúc",
+                    "Tham quan Chùa Thiên Mụ",
+                    "Ngắm cảnh và trải nghiệm không gian sông Hương"
+                ],
+                "meals": ["Bữa sáng", "Bữa trưa", "Bữa tối"],
+                "transport": "Xe du lịch",
+                "time": "07:30 - 19:30"
+            },
+            {
+                "day": "Ngày 3",
+                "title": "Mua đặc sản - Tham quan tự do - Kết thúc",
+                "places": ["Khu mua sắm đặc sản Huế"],
+                "activities": [
+                    "Ăn sáng và trả phòng",
+                    "Tự do tham quan thành phố",
+                    "Mua đặc sản Huế làm quà",
+                    "Dùng bữa trưa",
+                    "Kết thúc chương trình tour"
+                ],
+                "meals": ["Bữa sáng", "Bữa trưa"],
+                "transport": "Xe du lịch",
+                "time": "08:00 - 14:00"
+            }
         ]
     }
 ]
@@ -248,9 +476,18 @@ def recommend_tours(days, budget, people, interests, style):
 
 def build_custom_schedule(tour, date_start, people):
     result = []
-    for index, item in enumerate(tour["schedule"]):
+    for index, day in enumerate(tour["schedule"]):
         current_date = date_start + timedelta(days=index)
-        result.append(f"{current_date.strftime('%d/%m/%Y')} — {item}")
+        result.append({
+            "date": current_date.strftime("%d/%m/%Y"),
+            "day": day["day"],
+            "title": day["title"],
+            "places": day["places"],
+            "activities": day["activities"],
+            "meals": day["meals"],
+            "transport": day["transport"],
+            "time": day["time"]
+        })
     return result
 
 
@@ -440,9 +677,16 @@ elif st.session_state.page == "AI":
                         f"🚐 {tour['transport']}  | "
                         f"🎯 Độ phù hợp: **{min(score, 100)}%**"
                     )
-                    st.write("**Lịch trình:**")
-                    for item in tour["schedule"]:
-                        st.write("• " + item)
+                    st.write("**Lịch trình theo ngày:**")
+                    for day in tour["schedule"]:
+                        with st.expander(f"📅 {day['day']} — {day['title']}"):
+                            st.write(f"🕐 **Thời gian:** {day['time']}")
+                            st.write(f"📍 **Điểm tham quan:** {', '.join(day['places'])}")
+                            st.write("**🎯 Hoạt động:**")
+                            for activity in day["activities"]:
+                                st.write("• " + activity)
+                            st.write(f"🍽️ **Bữa ăn:** {', '.join(day['meals'])}")
+                            st.write(f"🚐 **Phương tiện:** {day['transport']}")
 
                 with col2:
                     st.markdown(f"### {money(tour['price'])}")
@@ -520,9 +764,32 @@ elif st.session_state.page == "TOURS":
 
                 if st.session_state.selected_tour == tour["id"]:
                     st.divider()
-                    st.write("### 📅 Lịch trình")
-                    for item in tour["schedule"]:
-                        st.write("• " + item)
+                    st.write("### 📅 Lịch trình chi tiết từng ngày")
+                    st.caption("Nhấn vào từng ngày để xem điểm tham quan và các hoạt động.")
+
+                    for day in tour["schedule"]:
+                        with st.expander(
+                            f"📅 {day['day']} — {day['title']}",
+                            expanded=False
+                        ):
+                            info1, info2, info3 = st.columns(3)
+                            with info1:
+                                st.markdown("**🕐 Thời gian**")
+                                st.write(day["time"])
+                            with info2:
+                                st.markdown("**🚐 Phương tiện**")
+                                st.write(day["transport"])
+                            with info3:
+                                st.markdown("**🍽️ Bữa ăn**")
+                                st.write(", ".join(day["meals"]))
+
+                            st.markdown("### 📍 Điểm tham quan")
+                            for place in day["places"]:
+                                st.write(f"• {place}")
+
+                            st.markdown("### 🎯 Hoạt động trong ngày")
+                            for number, activity in enumerate(day["activities"], 1):
+                                st.write(f"{number}. {activity}")
 
                     with st.form(f"booking_form_{tour['id']}"):
                         c1, c2 = st.columns(2)
