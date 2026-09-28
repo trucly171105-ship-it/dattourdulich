@@ -1,8 +1,8 @@
 import streamlit as st
-import sqlite3
+import mysql.connector
+from mysql.connector import Error
 import uuid
 from datetime import datetime, date
-from pathlib import Path
 
 # ============================================================
 # CẤU HÌNH ỨNG DỤNG
@@ -15,18 +15,56 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 st.image("VT.jpg")
-DB_FILE = "tour_booking.db"
+# ============================================================
+# CẤU HÌNH MYSQL AIVEN
+# ============================================================
+
+DB_CONFIG = {
+    "host": "mysql-d660cbf-trucly171105-b953.k.aivencloud.com",
+    "port": 27221,
+    "user": "avnadmin",
+    "password": "AVNS_cyQyD8Ez8n3Ggy-ax8l.",
+    "database": "defaultdb",
+    "ssl_verify_cert": False,
+    "ssl_verify_identity": False,
+    "ssl_disabled": False,
+    "connection_timeout": 15,
+}
+
+class MySQLConnection:
+    """Wrapper để giữ cách gọi DB gần giống code SQLite ban đầu."""
+
+    def __init__(self):
+        self.conn = mysql.connector.connect(**DB_CONFIG)
+
+    def cursor(self, dictionary=False):
+        return self.conn.cursor(dictionary=dictionary)
+
+    def execute(self, query, params=None):
+        cursor = self.conn.cursor(dictionary=True)
+        cursor.execute(query, params or ())
+        return cursor
+
+    def commit(self):
+        self.conn.commit()
+
+    def close(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+def get_connection():
+    try:
+        return MySQLConnection()
+    except Error as e:
+        st.error(f"Không thể kết nối MySQL Aiven: {e}")
+        st.stop()
 
 
 # ============================================================
 # DATABASE
 # ============================================================
-
-def get_connection():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
-
 
 def init_database():
     conn = get_connection()
@@ -35,33 +73,33 @@ def init_database():
     # Bảng tour
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tours (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INT AUTO_INCREMENT PRIMARY KEY,
             name TEXT NOT NULL,
             destination TEXT NOT NULL,
             duration TEXT NOT NULL,
-            price REAL NOT NULL,
+            price DECIMAL(15,2) NOT NULL,
             category TEXT NOT NULL,
             image TEXT,
             description TEXT,
             schedule TEXT,
-            max_people INTEGER DEFAULT 30
+            max_people INT DEFAULT 30
         )
     """)
 
     # Bảng booking
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bookings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            booking_code TEXT UNIQUE NOT NULL,
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            booking_code VARCHAR(50) UNIQUE NOT NULL,
             tour_id INTEGER NOT NULL,
             customer_name TEXT NOT NULL,
             phone TEXT NOT NULL,
             email TEXT,
-            people INTEGER NOT NULL,
+            people INT NOT NULL,
             departure_date TEXT NOT NULL,
             payment_method TEXT NOT NULL,
             note TEXT,
-            total_price REAL NOT NULL,
+            total_price DECIMAL(15,2) NOT NULL,
             status TEXT DEFAULT 'Chờ xác nhận',
             created_at TEXT NOT NULL,
             FOREIGN KEY (tour_id) REFERENCES tours(id)
@@ -147,7 +185,7 @@ def init_database():
             INSERT INTO tours
             (name, destination, duration, price, category, image,
              description, schedule, max_people)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, tours)
 
         conn.commit()
@@ -171,7 +209,7 @@ def get_tours():
 def get_tour(tour_id):
     conn = get_connection()
     row = conn.execute(
-        "SELECT * FROM tours WHERE id = ?",
+        "SELECT * FROM tours WHERE id = %s",
         (tour_id,)
     ).fetchone()
     conn.close()
@@ -212,7 +250,7 @@ def create_booking(
             status,
             created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         booking_code,
         tour_id,
@@ -245,7 +283,7 @@ def get_booking(booking_code):
             tours.duration
         FROM bookings
         JOIN tours ON bookings.tour_id = tours.id
-        WHERE bookings.booking_code = ?
+        WHERE bookings.booking_code = %s
     """, (booking_code,)).fetchone()
 
     conn.close()
@@ -276,7 +314,7 @@ def cancel_booking(booking_code):
     conn.execute("""
         UPDATE bookings
         SET status = 'Đã hủy'
-        WHERE booking_code = ?
+        WHERE booking_code = %s
     """, (booking_code,))
 
     conn.commit()
