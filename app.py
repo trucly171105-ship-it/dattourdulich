@@ -1,8 +1,10 @@
 import streamlit as st
-import mysql.connector
-from mysql.connector import Error
+import socket
 import uuid
 from datetime import datetime, date
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 # ============================================================
 # CẤU HÌNH ỨNG DỤNG
@@ -14,206 +16,255 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-st.image("VT.jpg")
+
+# Hiển thị banner nếu file tồn tại; tránh làm app lỗi nếu thiếu VT.jpg
+try:
+    st.image("VT.jpg", use_container_width=True)
+except Exception:
+    pass
+
 # ============================================================
-# CẤU HÌNH MYSQL AIVEN
+# KẾT NỐI AIVEN MYSQL
 # ============================================================
 
-DB_CONFIG = {
-    "host": "mysql-d660cbf-trucly171105-b953.k.aivencloud.com",
-    "port": 27221,
-    "user": "avnadmin",
-    "password": "AVNS_cyQyD8Ez8n3Ggy-ax8l.",
-    "database": "defaultdb",
-    "ssl_verify_cert": False,
-    "ssl_verify_identity": False,
-    "ssl_disabled": False,
-    "connection_timeout": 15,
-}
+# Ưu tiên lấy cấu hình từ st.secrets khi triển khai Streamlit Cloud.
+# Nếu chưa có secrets, app sẽ dùng cấu hình Aiven bên dưới.
+try:
+    DB_USER = st.secrets["mysql"]["user"]
+    DB_PASSWORD = st.secrets["mysql"]["password"]
+    DB_HOST = st.secrets["mysql"]["host"]
+    DB_PORT = st.secrets["mysql"]["port"]
+    DB_NAME = st.secrets["mysql"]["database"]
+except Exception:
+    DB_USER = "avnadmin"
+    DB_PASSWORD = "AVNS_cyQyD8Ez8n3Ggy-ax8l."
+    DB_HOST = "mysql-d660cbf-trucly171105-b953.k.aivencloud.com"
+    DB_PORT = 27221
+    DB_NAME = "defaultdb"
 
-class MySQLConnection:
-    """Wrapper để giữ cách gọi DB gần giống code SQLite ban đầu."""
+# ------------------------------------------------------------------
+# Làm sạch dữ liệu kết nối
+# ------------------------------------------------------------------
 
-    def __init__(self):
-        self.conn = mysql.connector.connect(**DB_CONFIG)
+DB_USER = str(DB_USER).strip()
+DB_PASSWORD = str(DB_PASSWORD).strip()
+DB_HOST = str(DB_HOST).strip()
+DB_NAME = str(DB_NAME).strip()
+DB_PORT = int(DB_PORT)
 
-    def cursor(self, dictionary=False):
-        return self.conn.cursor(dictionary=dictionary)
+# ============================================================
+# DEBUG KẾT NỐI AIVEN
+# ============================================================
 
-    def execute(self, query, params=None):
-        cursor = self.conn.cursor(dictionary=True)
-        cursor.execute(query, params or ())
-        return cursor
+with st.expander("🔧 Kiểm tra kết nối Aiven", expanded=False):
+    st.write("**HOST:**", repr(DB_HOST))
+    st.write("**PORT:**", repr(DB_PORT))
+    st.write("**DATABASE:**", repr(DB_NAME))
+    st.write("**USER:**", repr(DB_USER))
 
-    def commit(self):
-        self.conn.commit()
+    if DB_HOST != DB_HOST.strip():
+        st.error("HOST đang có khoảng trắng ở đầu hoặc cuối. Đã tự động loại bỏ.")
+    else:
+        st.success("HOST không có khoảng trắng.")
 
-    def close(self):
+    if st.button("🔍 Kiểm tra DNS Aiven", key="check_dns_aiven"):
         try:
-            self.conn.close()
-        except Exception:
-            pass
-
-def get_connection():
-    try:
-        return MySQLConnection()
-    except Error as e:
-        st.error(f"Không thể kết nối MySQL Aiven: {e}")
-        st.stop()
-
+            ip_address = socket.gethostbyname(DB_HOST)
+            st.success(f"DNS OK - Host Aiven trỏ tới IP: {ip_address}")
+        except Exception as e:
+            st.error(f"DNS ERROR: Không phân giải được hostname Aiven.\n\n{e}")
 
 # ============================================================
-# DATABASE
+# TẠO DATABASE URL
+# ============================================================
+
+DATABASE_URL = URL.create(
+    drivername="mysql+pymysql",
+    username=DB_USER,
+    password=DB_PASSWORD,
+    host=DB_HOST,
+    port=DB_PORT,
+    database=DB_NAME,
+)
+
+# ============================================================
+# DATABASE ENGINE
+# ============================================================
+
+@st.cache_resource
+def get_db_engine():
+    return create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=5,
+        connect_args={"connect_timeout": 15},
+    )
+
+# ============================================================
+# KIỂM TRA KẾT NỐI MYSQL
+# ============================================================
+
+def test_database_connection():
+    try:
+        engine = get_db_engine()
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT 1"))
+            result.fetchone()
+        return True, "Kết nối Aiven MySQL thành công!"
+    except Exception as e:
+        return False, str(e)
+
+# ============================================================
+# DATABASE - KHỞI TẠO BẢNG VÀ DỮ LIỆU MẪU
 # ============================================================
 
 def init_database():
-    conn = get_connection()
-    cursor = conn.cursor()
+    engine = get_db_engine()
 
-    # Bảng tour
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tours (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            name TEXT NOT NULL,
-            destination TEXT NOT NULL,
-            duration TEXT NOT NULL,
-            price DECIMAL(15,2) NOT NULL,
-            category TEXT NOT NULL,
-            image TEXT,
-            description TEXT,
-            schedule TEXT,
-            max_people INT DEFAULT 30
-        )
-    """)
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS tours (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                destination VARCHAR(255) NOT NULL,
+                duration VARCHAR(100) NOT NULL,
+                price DECIMAL(15,2) NOT NULL,
+                category VARCHAR(100) NOT NULL,
+                image TEXT,
+                description TEXT,
+                schedule TEXT,
+                max_people INT DEFAULT 30
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """))
 
-    # Bảng booking
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS bookings (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            booking_code VARCHAR(50) UNIQUE NOT NULL,
-            tour_id INTEGER NOT NULL,
-            customer_name TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            email TEXT,
-            people INT NOT NULL,
-            departure_date TEXT NOT NULL,
-            payment_method TEXT NOT NULL,
-            note TEXT,
-            total_price DECIMAL(15,2) NOT NULL,
-            status TEXT DEFAULT 'Chờ xác nhận',
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (tour_id) REFERENCES tours(id)
-        )
-    """)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS bookings (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                booking_code VARCHAR(50) UNIQUE NOT NULL,
+                tour_id INT NOT NULL,
+                customer_name VARCHAR(255) NOT NULL,
+                phone VARCHAR(50) NOT NULL,
+                email VARCHAR(255),
+                people INT NOT NULL,
+                departure_date VARCHAR(50) NOT NULL,
+                payment_method VARCHAR(100) NOT NULL,
+                note TEXT,
+                total_price DECIMAL(15,2) NOT NULL,
+                status VARCHAR(100) DEFAULT 'Chờ xác nhận',
+                created_at VARCHAR(50) NOT NULL,
+                CONSTRAINT fk_bookings_tour
+                    FOREIGN KEY (tour_id) REFERENCES tours(id)
+                    ON UPDATE CASCADE
+                    ON DELETE RESTRICT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """))
 
-    conn.commit()
+        count = conn.execute(text("SELECT COUNT(*) FROM tours")).scalar_one()
 
-    # Kiểm tra dữ liệu tour
-    count = cursor.execute("SELECT COUNT(*) FROM tours").fetchone()[0]
+        if count == 0:
+            tours = [
+                (
+                    "Khám phá Vũng Tàu 2N1Đ",
+                    "Vũng Tàu",
+                    "2 ngày 1 đêm",
+                    1890000,
+                    "Biển",
+                    "https://images.unsplash.com/photo-1563492065599-3520f775eeed?auto=format&fit=crop&w=1200&q=80",
+                    "Khám phá những điểm đến nổi bật tại Vũng Tàu như Bạch Dinh, Núi Lớn, Bãi Trước và thưởng thức đặc sản địa phương.",
+                    "Ngày 1: TP.HCM - Vũng Tàu - Bạch Dinh - Bãi Trước\nNgày 2: Núi Lớn - Hải đăng - Mua đặc sản - TP.HCM",
+                    30
+                ),
+                (
+                    "Phú Quốc Thiên Đường 3N2Đ",
+                    "Phú Quốc",
+                    "3 ngày 2 đêm",
+                    4590000,
+                    "Nghỉ dưỡng",
+                    "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=1200&q=80",
+                    "Hành trình nghỉ dưỡng tại đảo ngọc Phú Quốc, kết hợp tham quan biển đảo, vui chơi và thưởng thức ẩm thực.",
+                    "Ngày 1: Đến Phú Quốc - Grand World\nNgày 2: Nam đảo - Hòn Thơm\nNgày 3: Chợ Dương Đông - Tiễn sân bay",
+                    25
+                ),
+                (
+                    "Đà Nẵng - Hội An 4N3Đ",
+                    "Đà Nẵng",
+                    "4 ngày 3 đêm",
+                    5290000,
+                    "Khám phá",
+                    "https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?auto=format&fit=crop&w=1200&q=80",
+                    "Khám phá Đà Nẵng, Hội An và những địa danh nổi tiếng miền Trung.",
+                    "Ngày 1: Đà Nẵng - Sơn Trà\nNgày 2: Bà Nà Hills\nNgày 3: Hội An\nNgày 4: Mua sắm - Tiễn sân bay",
+                    30
+                ),
+                (
+                    "Đà Lạt Mộng Mơ 3N2Đ",
+                    "Đà Lạt",
+                    "3 ngày 2 đêm",
+                    3290000,
+                    "Nghỉ dưỡng",
+                    "https://images.unsplash.com/photo-1557750255-c76072a7aad1?auto=format&fit=crop&w=1200&q=80",
+                    "Hành trình khám phá thành phố ngàn hoa với nhiều địa điểm check-in nổi tiếng.",
+                    "Ngày 1: Trung tâm Đà Lạt\nNgày 2: Đồi chè - Thác Datanla\nNgày 3: Chợ Đà Lạt - Trả khách",
+                    30
+                ),
+                (
+                    "Huế - Dấu ấn Hoàng triều 3N2Đ",
+                    "Huế",
+                    "3 ngày 2 đêm",
+                    3890000,
+                    "Văn hóa",
+                    "https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?auto=format&fit=crop&w=1200&q=80",
+                    "Hành trình tìm hiểu văn hóa, lịch sử và kiến trúc cố đô Huế.",
+                    "Ngày 1: Đại Nội - Đông Ba\nNgày 2: Lăng Khải Định - Lăng Minh Mạng\nNgày 3: Chùa Thiên Mụ - Trả khách",
+                    25
+                ),
+                (
+                    "Nha Trang - Vịnh Nha Trang 3N2Đ",
+                    "Nha Trang",
+                    "3 ngày 2 đêm",
+                    4190000,
+                    "Biển",
+                    "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80",
+                    "Tận hưởng biển xanh Nha Trang và trải nghiệm tour đảo.",
+                    "Ngày 1: Nha Trang - Tháp Bà\nNgày 2: Tour đảo - Lặn ngắm san hô\nNgày 3: Mua sắm - Trả khách",
+                    30
+                ),
+            ]
 
-    if count == 0:
-        tours = [
-            (
-                "Khám phá Vũng Tàu 2N1Đ",
-                "Vũng Tàu",
-                "2 ngày 1 đêm",
-                1890000,
-                "Biển",
-                "https://images.unsplash.com/photo-1563492065599-3520f775eeed?auto=format&fit=crop&w=1200&q=80",
-                "Khám phá những điểm đến nổi bật tại Vũng Tàu như Bạch Dinh, Núi Lớn, Bãi Trước và thưởng thức đặc sản địa phương.",
-                "Ngày 1: TP.HCM - Vũng Tàu - Bạch Dinh - Bãi Trước\nNgày 2: Núi Lớn - Hải đăng - Mua đặc sản - TP.HCM",
-                30
-            ),
-            (
-                "Phú Quốc Thiên Đường 3N2Đ",
-                "Phú Quốc",
-                "3 ngày 2 đêm",
-                4590000,
-                "Nghỉ dưỡng",
-                "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=1200&q=80",
-                "Hành trình nghỉ dưỡng tại đảo ngọc Phú Quốc, kết hợp tham quan biển đảo, vui chơi và thưởng thức ẩm thực.",
-                "Ngày 1: Đến Phú Quốc - Grand World\nNgày 2: Nam đảo - Hòn Thơm\nNgày 3: Chợ Dương Đông - Tiễn sân bay",
-                25
-            ),
-            (
-                "Đà Nẵng - Hội An 4N3Đ",
-                "Đà Nẵng",
-                "4 ngày 3 đêm",
-                5290000,
-                "Khám phá",
-                "https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?auto=format&fit=crop&w=1200&q=80",
-                "Khám phá Đà Nẵng, Hội An và những địa danh nổi tiếng miền Trung.",
-                "Ngày 1: Đà Nẵng - Sơn Trà\nNgày 2: Bà Nà Hills\nNgày 3: Hội An\nNgày 4: Mua sắm - Tiễn sân bay",
-                30
-            ),
-            (
-                "Đà Lạt Mộng Mơ 3N2Đ",
-                "Đà Lạt",
-                "3 ngày 2 đêm",
-                3290000,
-                "Nghỉ dưỡng",
-                "https://images.unsplash.com/photo-1557750255-c76072a7aad1?auto=format&fit=crop&w=1200&q=80",
-                "Hành trình khám phá thành phố ngàn hoa với nhiều địa điểm check-in nổi tiếng.",
-                "Ngày 1: Trung tâm Đà Lạt\nNgày 2: Đồi chè - Thác Datanla\nNgày 3: Chợ Đà Lạt - Trả khách",
-                30
-            ),
-            (
-                "Huế - Dấu ấn Hoàng triều 3N2Đ",
-                "Huế",
-                "3 ngày 2 đêm",
-                3890000,
-                "Văn hóa",
-                "https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?auto=format&fit=crop&w=1200&q=80",
-                "Hành trình tìm hiểu văn hóa, lịch sử và kiến trúc cố đô Huế.",
-                "Ngày 1: Đại Nội - Đông Ba\nNgày 2: Lăng Khải Định - Lăng Minh Mạng\nNgày 3: Chùa Thiên Mụ - Trả khách",
-                25
-            ),
-            (
-                "Nha Trang - Vịnh Nha Trang 3N2Đ",
-                "Nha Trang",
-                "3 ngày 2 đêm",
-                4190000,
-                "Biển",
-                "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80",
-                "Tận hưởng biển xanh Nha Trang và trải nghiệm tour đảo.",
-                "Ngày 1: Nha Trang - Tháp Bà\nNgày 2: Tour đảo - Lặn ngắm san hô\nNgày 3: Mua sắm - Trả khách",
-                30
-            )
-        ]
-
-        cursor.executemany("""
-            INSERT INTO tours
-            (name, destination, duration, price, category, image,
-             description, schedule, max_people)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, tours)
-
-        conn.commit()
-
-    conn.close()
-
+            conn.execute(text("""
+                INSERT INTO tours
+                (name, destination, duration, price, category, image, description, schedule, max_people)
+                VALUES
+                (:name, :destination, :duration, :price, :category, :image, :description, :schedule, :max_people)
+            """), [
+                {
+                    "name": t[0], "destination": t[1], "duration": t[2], "price": t[3],
+                    "category": t[4], "image": t[5], "description": t[6],
+                    "schedule": t[7], "max_people": t[8]
+                }
+                for t in tours
+            ])
 
 # ============================================================
 # HÀM DATABASE
 # ============================================================
 
 def get_tours():
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM tours ORDER BY id DESC"
-    ).fetchall()
-    conn.close()
-    return rows
+    engine = get_db_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT * FROM tours ORDER BY id DESC"))
+        return result.mappings().all()
 
 
 def get_tour(tour_id):
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM tours WHERE id = %s",
-        (tour_id,)
-    ).fetchone()
-    conn.close()
-    return row
+    engine = get_db_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT * FROM tours WHERE id = :tour_id"),
+            {"tour_id": tour_id}
+        )
+        return result.mappings().first()
 
 
 def create_booking(
@@ -227,99 +278,85 @@ def create_booking(
     note,
     total_price
 ):
-    conn = get_connection()
+    engine = get_db_engine()
 
-    booking_code = "VT" + datetime.now().strftime("%y%m%d") + \
-                   uuid.uuid4().hex[:6].upper()
-
+    booking_code = (
+        "VT" + datetime.now().strftime("%y%m%d") +
+        uuid.uuid4().hex[:6].upper()
+    )
     created_at = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
-    conn.execute("""
-        INSERT INTO bookings
-        (
-            booking_code,
-            tour_id,
-            customer_name,
-            phone,
-            email,
-            people,
-            departure_date,
-            payment_method,
-            note,
-            total_price,
-            status,
-            created_at
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, (
-        booking_code,
-        tour_id,
-        customer_name,
-        phone,
-        email,
-        people,
-        departure_date,
-        payment_method,
-        note,
-        total_price,
-        "Chờ xác nhận",
-        created_at
-    ))
-
-    conn.commit()
-    conn.close()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO bookings
+            (
+                booking_code, tour_id, customer_name, phone, email, people,
+                departure_date, payment_method, note, total_price, status, created_at
+            )
+            VALUES
+            (
+                :booking_code, :tour_id, :customer_name, :phone, :email, :people,
+                :departure_date, :payment_method, :note, :total_price, :status, :created_at
+            )
+        """), {
+            "booking_code": booking_code,
+            "tour_id": tour_id,
+            "customer_name": customer_name,
+            "phone": phone,
+            "email": email,
+            "people": people,
+            "departure_date": departure_date,
+            "payment_method": payment_method,
+            "note": note,
+            "total_price": total_price,
+            "status": "Chờ xác nhận",
+            "created_at": created_at,
+        })
 
     return booking_code
 
 
 def get_booking(booking_code):
-    conn = get_connection()
-
-    row = conn.execute("""
-        SELECT
-            bookings.*,
-            tours.name AS tour_name,
-            tours.destination,
-            tours.duration
-        FROM bookings
-        JOIN tours ON bookings.tour_id = tours.id
-        WHERE bookings.booking_code = %s
-    """, (booking_code,)).fetchone()
-
-    conn.close()
-
-    return row
+    engine = get_db_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT
+                bookings.*,
+                tours.name AS tour_name,
+                tours.destination,
+                tours.duration
+            FROM bookings
+            JOIN tours ON bookings.tour_id = tours.id
+            WHERE bookings.booking_code = :booking_code
+        """), {"booking_code": booking_code})
+        return result.mappings().first()
 
 
 def get_all_bookings():
-    conn = get_connection()
-
-    rows = conn.execute("""
-        SELECT
-            bookings.*,
-            tours.name AS tour_name
-        FROM bookings
-        JOIN tours ON bookings.tour_id = tours.id
-        ORDER BY bookings.id DESC
-    """).fetchall()
-
-    conn.close()
-
-    return rows
+    engine = get_db_engine()
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT
+                bookings.*,
+                tours.name AS tour_name
+            FROM bookings
+            JOIN tours ON bookings.tour_id = tours.id
+            ORDER BY bookings.id DESC
+        """))
+        return result.mappings().all()
 
 
 def cancel_booking(booking_code):
-    conn = get_connection()
-
-    conn.execute("""
-        UPDATE bookings
-        SET status = 'Đã hủy'
-        WHERE booking_code = %s
-    """, (booking_code,))
-
-    conn.commit()
-    conn.close()
-
+    engine = get_db_engine()
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                UPDATE bookings
+                SET status = 'Đã hủy'
+                WHERE booking_code = :booking_code
+            """),
+            {"booking_code": booking_code}
+        )
 
 # ============================================================
 # FORMAT TIỀN
